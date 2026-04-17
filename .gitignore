@@ -1,0 +1,15 @@
+# binary
+spotui
+spotui-*
+
+# Claude Code session data
+.claude/
+
+# local dev docs (not for public repo)
+plan.md
+plan-*.md
+research.md
+
+# env
+.env
+.env.local
