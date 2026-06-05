@@ -4,6 +4,8 @@ import (
 	"github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/dcbto/spotui/internal/auth"
+	"github.com/dcbto/spotui/internal/library"
+	"github.com/dcbto/spotui/internal/spotifyapi"
 	"github.com/dcbto/spotui/internal/theme"
 	"github.com/dcbto/spotui/internal/tui/commands"
 	"github.com/dcbto/spotui/internal/tui/views"
@@ -18,14 +20,6 @@ const (
 	stateReady
 )
 
-type libraryTab int
-
-const (
-	tabPlaylists libraryTab = iota
-	tabTracks
-	tabArtists
-)
-
 type RootModel struct {
 	state    appState
 	width    int
@@ -36,14 +30,7 @@ type RootModel struct {
 
 	username string
 
-	playlists []spotify.SimplePlaylist
-	tracks    []spotify.SavedTrack
-	artists   []spotify.FullArtist
-	activeTab libraryTab
-
-	playlistCursor int
-	trackCursor    int
-	artistCursor   int
+	library *library.Library
 
 	nowPlaying      *spotify.PlayerState
 	shuffleOn       bool
@@ -68,6 +55,7 @@ func NewRootModel(clientID string) RootModel {
 	return RootModel{
 		state:    stateAuth,
 		clientID: clientID,
+		library:  library.New(),
 	}
 }
 
@@ -112,19 +100,31 @@ func (m RootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case PlaylistsLoadedMsg:
-		m.playlists = msg.Playlists
+		translated := make([]library.PlaylistEntry, len(msg.Playlists))
+		for i, pl := range msg.Playlists {
+			translated[i] = spotifyapi.TranslatePlaylist(pl)
+		}
+		m.library.SetPlaylists(translated)
 		m.loadedFlags |= loadedPlaylists
 		m.checkReady()
 		return m, nil
 
 	case TracksLoadedMsg:
-		m.tracks = msg.Tracks
+		translated := make([]library.TrackEntry, len(msg.Tracks))
+		for i, t := range msg.Tracks {
+			translated[i] = spotifyapi.TranslateTrack(t)
+		}
+		m.library.SetTracks(translated)
 		m.loadedFlags |= loadedTracks
 		m.checkReady()
 		return m, nil
 
 	case ArtistsLoadedMsg:
-		m.artists = msg.Artists
+		translated := make([]library.ArtistEntry, len(msg.Artists))
+		for i, a := range msg.Artists {
+			translated[i] = spotifyapi.TranslateArtist(a)
+		}
+		m.library.SetArtists(translated)
 		m.loadedFlags |= loadedArtists
 		m.checkReady()
 		return m, nil
@@ -199,13 +199,13 @@ func (m RootModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	switch msg.String() {
 	case KeyTab1:
-		m.activeTab = tabPlaylists
+		m.library.SetActiveTab(library.TabPlaylists)
 		return m, nil
 	case KeyTab2:
-		m.activeTab = tabTracks
+		m.library.SetActiveTab(library.TabTracks)
 		return m, nil
 	case KeyTab3:
-		m.activeTab = tabArtists
+		m.library.SetActiveTab(library.TabArtists)
 		return m, nil
 
 	case KeySpace:
@@ -224,68 +224,30 @@ func (m RootModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case KeySettings:
 		auth.OpenSpotifySettings()
 		return m, nil
-	}
 
-	switch m.activeTab {
-	case tabPlaylists:
-		return m.handlePlaylistKeys(msg)
-	case tabTracks:
-		return m.handleTrackKeys(msg)
-	case tabArtists:
-		return m.handleArtistKeys(msg)
-	}
-
-	return m, nil
-}
-
-func (m RootModel) handlePlaylistKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	switch msg.String() {
 	case KeyUp, KeyUpAlt:
-		if m.playlistCursor > 0 {
-			m.playlistCursor--
-		}
+		m.library.MoveUp()
+		return m, nil
 	case KeyDown, KeyDownAlt:
-		if m.playlistCursor < len(m.playlists)-1 {
-			m.playlistCursor++
-		}
+		m.library.MoveDown()
+		return m, nil
 	case KeyEnter:
-		if len(m.playlists) > 0 {
-			pl := m.playlists[m.playlistCursor]
-			return m, commands.CmdPlayPlaylist(m.client, pl.URI)
-		}
+		return m.handleEnter()
 	}
+
 	return m, nil
 }
 
-func (m RootModel) handleTrackKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	switch msg.String() {
-	case KeyUp, KeyUpAlt:
-		if m.trackCursor > 0 {
-			m.trackCursor--
-		}
-	case KeyDown, KeyDownAlt:
-		if m.trackCursor < len(m.tracks)-1 {
-			m.trackCursor++
-		}
-	case KeyEnter:
-		if len(m.tracks) > 0 {
-			track := m.tracks[m.trackCursor].FullTrack
-			return m, commands.CmdPlayTrack(m.client, track.URI)
-		}
+func (m RootModel) handleEnter() (tea.Model, tea.Cmd) {
+	uri := m.library.SelectedURI()
+	if uri == "" {
+		return m, nil
 	}
-	return m, nil
-}
-
-func (m RootModel) handleArtistKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	switch msg.String() {
-	case KeyUp, KeyUpAlt:
-		if m.artistCursor > 0 {
-			m.artistCursor--
-		}
-	case KeyDown, KeyDownAlt:
-		if m.artistCursor < len(m.artists)-1 {
-			m.artistCursor++
-		}
+	switch m.library.ActiveTab() {
+	case library.TabPlaylists:
+		return m, commands.CmdPlayPlaylist(m.client, spotify.URI(uri))
+	case library.TabTracks:
+		return m, commands.CmdPlayTrack(m.client, spotify.URI(uri))
 	}
 	return m, nil
 }
@@ -320,7 +282,7 @@ func (m RootModel) renderMain() string {
 	}
 
 	header := views.RenderHeader(m.width, m.username, false)
-	tabBar := views.RenderTabBar(m.width, views.LibraryTab(m.activeTab))
+	tabBar := m.library.TabBar(m.width)
 	player := views.RenderPlayer(m.width, m.nowPlaying, m.shuffleOn, m.localProgressMs)
 
 	headerH := lipgloss.Height(header)
@@ -335,19 +297,10 @@ func (m RootModel) renderMain() string {
 		libraryH = 1
 	}
 
-	var libraryContent string
-	switch m.activeTab {
-	case tabPlaylists:
-		libraryContent = views.RenderPlaylists(m.width, libraryH, m.playlistCursor, m.playlists)
-	case tabTracks:
-		libraryContent = views.RenderTracks(m.width, libraryH, m.trackCursor, m.tracks)
-	case tabArtists:
-		libraryContent = views.RenderArtists(m.width, libraryH, m.artistCursor, m.artists)
-	}
+	libraryContent := m.library.View(m.width, libraryH)
+	lib := lipgloss.NewStyle().Height(libraryH).Width(m.width).Render(libraryContent)
 
-	library := lipgloss.NewStyle().Height(libraryH).Width(m.width).Render(libraryContent)
-
-	rows := []string{header, tabBar, library}
+	rows := []string{header, tabBar, lib}
 
 	if m.statusMsg != "" {
 		var statusLine string
