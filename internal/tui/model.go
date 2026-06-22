@@ -100,11 +100,7 @@ func (m RootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case PlaylistsLoadedMsg:
-		translated := make([]library.PlaylistEntry, len(msg.Playlists))
-		for i, pl := range msg.Playlists {
-			translated[i] = spotifyapi.TranslatePlaylist(pl)
-		}
-		m.library.SetPlaylists(translated)
+		m.library.SetPlaylists(msg.Playlists)
 		m.loadedFlags |= loadedPlaylists
 		m.checkReady()
 		return m, nil

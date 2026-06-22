@@ -1,6 +1,7 @@
 package msgs
 
 import (
+	"github.com/dcbto/spotui/internal/library"
 	"github.com/zmb3/spotify/v2"
 )
 
@@ -17,7 +18,7 @@ type UserLoadedMsg struct {
 }
 
 type PlaylistsLoadedMsg struct {
-	Playlists []spotify.SimplePlaylist
+	Playlists []library.PlaylistEntry
 }
 
 type TracksLoadedMsg struct {
