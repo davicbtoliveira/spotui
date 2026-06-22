@@ -5,4 +5,5 @@ type NowPlayingEntry struct {
 	Playing    bool
 	ShuffleOn  bool
 	TrackName  string
+	Duration   int
 }

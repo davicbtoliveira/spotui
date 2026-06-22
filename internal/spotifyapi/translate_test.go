@@ -106,3 +106,18 @@ func TestTranslateNowPlayingTrackName(t *testing.T) {
 		t.Fatalf("TrackName: want %q, got %q", "Song", got.TrackName)
 	}
 }
+
+func TestTranslateNowPlayingDuration(t *testing.T) {
+	got := spotifyapi.TranslateNowPlayingEntry(spotify.PlayerState{
+		CurrentlyPlaying: spotify.CurrentlyPlaying{
+			Item: &spotify.FullTrack{
+				SimpleTrack: spotify.SimpleTrack{
+					Duration: 180000,
+				},
+			},
+		},
+	})
+	if got.Duration != 180000 {
+		t.Fatalf("Duration: want 180000, got %d", got.Duration)
+	}
+}

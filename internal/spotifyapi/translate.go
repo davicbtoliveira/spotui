@@ -38,13 +38,16 @@ func TranslateArtist(a spotify.FullArtist) library.ArtistEntry {
 
 func TranslateNowPlayingEntry(s spotify.PlayerState) player.NowPlayingEntry {
 	var trackName string
+	var duration int
 	if s.Item != nil {
 		trackName = s.Item.Name
+		duration = int(s.Item.Duration)
 	}
 	return player.NowPlayingEntry{
 		ProgressMs: int(s.Progress),
 		Playing:    s.Playing,
 		ShuffleOn:  s.ShuffleState,
 		TrackName:  trackName,
+		Duration:   duration,
 	}
 }

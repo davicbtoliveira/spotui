@@ -23,7 +23,7 @@ func TestSetNowPlayingSetsProgress(t *testing.T) {
 
 func TestTickAdvancesProgressWhenPlaying(t *testing.T) {
 	p := player.New()
-	p.SetNowPlaying(player.NowPlayingEntry{ProgressMs: 0, Playing: true})
+	p.SetNowPlaying(player.NowPlayingEntry{ProgressMs: 0, Playing: true, Duration: 200000})
 	p.Tick()
 	if p.ProgressMs() != 1000 {
 		t.Fatalf("want 1000, got %d", p.ProgressMs())
@@ -36,5 +36,14 @@ func TestTickDoesNothingWhenNotPlaying(t *testing.T) {
 	p.Tick()
 	if p.ProgressMs() != 5000 {
 		t.Fatalf("want 5000, got %d", p.ProgressMs())
+	}
+}
+
+func TestTickClampsAtDuration(t *testing.T) {
+	p := player.New()
+	p.SetNowPlaying(player.NowPlayingEntry{ProgressMs: 199500, Duration: 200000, Playing: true})
+	p.Tick()
+	if p.ProgressMs() != 200000 {
+		t.Fatalf("want clamp at 200000, got %d", p.ProgressMs())
 	}
 }
