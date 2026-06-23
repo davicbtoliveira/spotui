@@ -26,6 +26,11 @@ type TracksLoadedMsg struct {
 	Total  int
 }
 
+type TrackSearchLoadedMsg struct {
+	Tracks []spotify.FullTrack
+	Total  int
+}
+
 type ArtistsLoadedMsg struct {
 	Artists []spotify.FullArtist
 }

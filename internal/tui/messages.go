@@ -10,6 +10,7 @@ type AuthErrMsg = msgs.AuthErrMsg
 type UserLoadedMsg = msgs.UserLoadedMsg
 type PlaylistsLoadedMsg = msgs.PlaylistsLoadedMsg
 type TracksLoadedMsg = msgs.TracksLoadedMsg
+type TrackSearchLoadedMsg = msgs.TrackSearchLoadedMsg
 type ArtistsLoadedMsg = msgs.ArtistsLoadedMsg
 type NowPlayingMsg = msgs.NowPlayingMsg
 type TickMsg = msgs.TickMsg
