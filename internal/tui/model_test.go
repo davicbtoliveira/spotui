@@ -1,13 +1,31 @@
 package tui
 
 import (
+	"context"
+	"errors"
 	"strings"
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/dcbto/spotui/internal/library"
+	"github.com/dcbto/spotui/internal/msgs"
+	"github.com/dcbto/spotui/internal/spotifyapi"
 	"github.com/zmb3/spotify/v2"
 )
+
+type modelTrackSearcher struct {
+	req spotifyapi.TrackSearchRequest
+}
+
+func (s *modelTrackSearcher) SearchTracks(_ context.Context, req spotifyapi.TrackSearchRequest) (spotifyapi.TrackSearchPage, error) {
+	s.req = req
+	return spotifyapi.TrackSearchPage{
+		Tracks: []spotify.FullTrack{
+			{SimpleTrack: spotify.SimpleTrack{Name: "Hello", URI: "spotify:track:hello"}},
+		},
+		Total: 1,
+	}, nil
+}
 
 func newReadyModel() RootModel {
 	m := NewRootModel("")
@@ -168,5 +186,185 @@ func TestBlankTrackSearchSubmitDoesNotStartCommand(t *testing.T) {
 	}
 	if view := m.View(); !strings.Contains(view, "Search: ") {
 		t.Fatalf("blank submit should keep input visible:\n%s", view)
+	}
+}
+
+func TestTrackSearchSubmitStartsLoading(t *testing.T) {
+	m := newReadyModel()
+
+	m = sendKey(m, "/")
+	m = sendKey(m, "a")
+	m = sendKey(m, "d")
+	m = sendKey(m, "e")
+	m = sendKey(m, "l")
+	m = sendKey(m, "e")
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = updated.(RootModel)
+
+	if cmd == nil {
+		t.Fatal("track search submit returned no command")
+	}
+	view := m.View()
+	if strings.Contains(view, "Search: adele") {
+		t.Fatalf("search input still visible after submit:\n%s", view)
+	}
+	if !strings.Contains(view, "Searching tracks...") {
+		t.Fatalf("search loading state missing from view:\n%s", view)
+	}
+}
+
+func TestTrackSearchSubmitDispatchesSearchCommand(t *testing.T) {
+	searcher := &modelTrackSearcher{}
+	m := newReadyModel()
+	m.trackSearcher = searcher
+
+	m = sendKey(m, "/")
+	m = sendKey(m, "h")
+	m = sendKey(m, "i")
+	m = sendSpecialKey(m, tea.KeySpace)
+	m = sendKey(m, "a")
+	m = sendKey(m, "d")
+	m = sendKey(m, "e")
+	m = sendKey(m, "l")
+	m = sendKey(m, "e")
+	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+
+	msg := cmd()
+	if searcher.req.Query != "hi adele" {
+		t.Fatalf("Query: want raw query, got %q", searcher.req.Query)
+	}
+	if _, ok := msg.(msgs.TrackSearchLoadedMsg); !ok {
+		t.Fatalf("message: want TrackSearchLoadedMsg, got %T", msg)
+	}
+}
+
+func TestTrackSearchResultsRenderLikeTracks(t *testing.T) {
+	m := newReadyModel()
+	m.library.SetActiveTab(library.TabSearch)
+	m.searchLoading = true
+
+	updated, _ := m.Update(TrackSearchLoadedMsg{Tracks: []spotify.FullTrack{
+		{
+			SimpleTrack: spotify.SimpleTrack{
+				Name:     "Hello",
+				Artists:  []spotify.SimpleArtist{{Name: "Adele"}},
+				Duration: 295000,
+				URI:      "spotify:track:hello",
+			},
+		},
+	}})
+	m = updated.(RootModel)
+
+	view := m.View()
+	if strings.Contains(view, "Searching tracks...") {
+		t.Fatalf("search loading still visible after results:\n%s", view)
+	}
+	for _, want := range []string{"Hello", "Adele", "04:55"} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("search result missing %q from view:\n%s", want, view)
+		}
+	}
+}
+
+func TestTrackSearchKeepsPriorResultsWhileLoading(t *testing.T) {
+	m := newReadyModel()
+	m.library.SetActiveTab(library.TabSearch)
+
+	updated, _ := m.Update(TrackSearchLoadedMsg{Tracks: []spotify.FullTrack{
+		{
+			SimpleTrack: spotify.SimpleTrack{
+				Name:     "Old Result",
+				Artists:  []spotify.SimpleArtist{{Name: "Adele"}},
+				Duration: 180000,
+				URI:      "spotify:track:old",
+			},
+		},
+	}})
+	m = updated.(RootModel)
+
+	m = sendKey(m, "/")
+	m = sendKey(m, "n")
+	m = sendKey(m, "e")
+	m = sendKey(m, "w")
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = updated.(RootModel)
+
+	view := m.View()
+	if !strings.Contains(view, "Searching tracks...") {
+		t.Fatalf("loading state missing from view:\n%s", view)
+	}
+	if !strings.Contains(view, "Old Result") {
+		t.Fatalf("prior result missing while loading:\n%s", view)
+	}
+}
+
+func TestEmptyTrackSearchShowsNoTracksFound(t *testing.T) {
+	m := newReadyModel()
+	m.library.SetActiveTab(library.TabSearch)
+	m.searchLoading = true
+
+	updated, _ := m.Update(TrackSearchLoadedMsg{})
+	m = updated.(RootModel)
+
+	view := m.View()
+	if strings.Contains(view, "Searching tracks...") {
+		t.Fatalf("search loading still visible after empty results:\n%s", view)
+	}
+	if !strings.Contains(view, "No tracks found") {
+		t.Fatalf("empty search state missing from view:\n%s", view)
+	}
+}
+
+func TestTrackSearchErrorClearsLoadingAndShowsStatus(t *testing.T) {
+	m := newReadyModel()
+	m.library.SetActiveTab(library.TabSearch)
+	m.searchLoading = true
+
+	updated, _ := m.Update(ErrMsg{Err: errors.New("spotify unavailable"), Context: "search tracks"})
+	m = updated.(RootModel)
+
+	view := m.View()
+	if strings.Contains(view, "Searching tracks...") {
+		t.Fatalf("search loading still visible after error:\n%s", view)
+	}
+	if !strings.Contains(view, "search tracks: spotify unavailable") {
+		t.Fatalf("search error missing from status:\n%s", view)
+	}
+}
+
+func TestEnterOnSearchResultStartsPlaybackCommand(t *testing.T) {
+	m := newReadyModel()
+	m.library.SetActiveTab(library.TabSearch)
+	updated, _ := m.Update(TrackSearchLoadedMsg{Tracks: []spotify.FullTrack{
+		{SimpleTrack: spotify.SimpleTrack{Name: "Hello", URI: "spotify:track:hello"}},
+	}})
+	m = updated.(RootModel)
+
+	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+
+	if cmd == nil {
+		t.Fatal("enter on search result returned no playback command")
+	}
+}
+
+func TestSearchResultCursorMovesWithNavigationKeys(t *testing.T) {
+	m := newReadyModel()
+	m.library.SetActiveTab(library.TabSearch)
+	updated, _ := m.Update(TrackSearchLoadedMsg{Tracks: []spotify.FullTrack{
+		{SimpleTrack: spotify.SimpleTrack{Name: "First", URI: "spotify:track:first"}},
+		{SimpleTrack: spotify.SimpleTrack{Name: "Second", URI: "spotify:track:second"}},
+	}})
+	m = updated.(RootModel)
+
+	m = sendKey(m, "j")
+
+	if got := m.library.SelectedURI(); got != "spotify:track:second" {
+		t.Fatalf("selected after j: want second track, got %q", got)
+	}
+
+	m = sendKey(m, "k")
+
+	if got := m.library.SelectedURI(); got != "spotify:track:first" {
+		t.Fatalf("selected after k: want first track, got %q", got)
 	}
 }

@@ -52,6 +52,32 @@ func TestTranslateTrack(t *testing.T) {
 	}
 }
 
+func TestTranslateFullTrack(t *testing.T) {
+	got := spotifyapi.TranslateFullTrack(spotify.FullTrack{
+		SimpleTrack: spotify.SimpleTrack{
+			Name: "Hello",
+			Artists: []spotify.SimpleArtist{
+				{Name: "Adele"},
+				{Name: "Guest"},
+			},
+			URI:      "spotify:track:hello",
+			Duration: 295000,
+		},
+	})
+	if got.Name != "Hello" {
+		t.Fatalf("Name: want %q, got %q", "Hello", got.Name)
+	}
+	if got.Artist != "Adele, Guest" {
+		t.Fatalf("Artist: want %q, got %q", "Adele, Guest", got.Artist)
+	}
+	if got.Duration != 295000 {
+		t.Fatalf("Duration: want 295000, got %d", got.Duration)
+	}
+	if got.URI != "spotify:track:hello" {
+		t.Fatalf("URI: want %q, got %q", "spotify:track:hello", got.URI)
+	}
+}
+
 func TestTranslateArtist(t *testing.T) {
 	got := spotifyapi.TranslateArtist(spotify.FullArtist{
 		SimpleArtist: spotify.SimpleArtist{Name: "Artist"},

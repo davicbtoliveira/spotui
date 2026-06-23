@@ -30,6 +30,8 @@ type RootModel struct {
 
 	client *spotify.Client
 
+	trackSearcher spotifyapi.TrackSearcher
+
 	username string
 
 	library *library.Library
@@ -44,6 +46,8 @@ type RootModel struct {
 
 	searchInputActive bool
 	searchQuery       string
+	searchLoading     bool
+	searchCompleted   bool
 
 	loadedFlags int
 }
@@ -78,6 +82,7 @@ func (m RootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case AuthDoneMsg:
 		m.client = msg.Client
+		m.trackSearcher = spotifyapi.SpotifyTrackSearcher{Client: msg.Client}
 		m.state = stateLoading
 		return m, tea.Batch(
 			commands.CmdFetchUser(m.client),
@@ -120,6 +125,16 @@ func (m RootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.checkReady()
 		return m, nil
 
+	case TrackSearchLoadedMsg:
+		translated := make([]library.TrackEntry, len(msg.Tracks))
+		for i, t := range msg.Tracks {
+			translated[i] = spotifyapi.TranslateFullTrack(t)
+		}
+		m.library.SetSearchResults(translated)
+		m.searchLoading = false
+		m.searchCompleted = true
+		return m, nil
+
 	case ArtistsLoadedMsg:
 		translated := make([]library.ArtistEntry, len(msg.Artists))
 		for i, a := range msg.Artists {
@@ -160,6 +175,9 @@ func (m RootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case ErrMsg:
 		m.statusMsg = msg.Context + ": " + msg.Err.Error()
 		m.statusIsErr = true
+		if msg.Context == "search tracks" {
+			m.searchLoading = false
+		}
 		return m, commands.CmdClearStatus()
 
 	case ClearStatusMsg:
@@ -211,6 +229,9 @@ func (m RootModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			if strings.TrimSpace(m.searchQuery) == "" {
 				return m, nil
 			}
+			m.searchInputActive = false
+			m.searchLoading = true
+			return m, commands.CmdSearchTracks(m.trackSearcher, m.searchQuery)
 		}
 	}
 
@@ -282,7 +303,7 @@ func (m RootModel) handleEnter() (tea.Model, tea.Cmd) {
 	switch m.library.ActiveTab() {
 	case library.TabPlaylists:
 		return m, commands.CmdPlayPlaylist(m.client, spotify.URI(uri))
-	case library.TabTracks:
+	case library.TabTracks, library.TabSearch:
 		return m, commands.CmdPlayTrack(m.client, spotify.URI(uri))
 	}
 	return m, nil
@@ -336,6 +357,15 @@ func (m RootModel) renderMain() string {
 	libraryContent := m.library.View(m.width, libraryH)
 	if m.library.ActiveTab() == library.TabSearch && m.searchInputActive {
 		libraryContent = theme.NormalItemStyle.Render("  Search: " + m.searchQuery)
+	} else if m.library.ActiveTab() == library.TabSearch && m.searchLoading {
+		loading := theme.SubtextStyle.Render("  Searching tracks...")
+		if m.library.SearchResultCount() > 0 {
+			libraryContent = lipgloss.JoinVertical(lipgloss.Left, loading, libraryContent)
+		} else {
+			libraryContent = loading
+		}
+	} else if m.library.ActiveTab() == library.TabSearch && m.searchCompleted && m.library.SearchResultCount() == 0 {
+		libraryContent = theme.SubtextStyle.Render("  No tracks found")
 	}
 	lib := lipgloss.NewStyle().Height(libraryH).Width(m.width).Render(libraryContent)
 

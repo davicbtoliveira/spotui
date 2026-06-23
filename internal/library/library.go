@@ -4,6 +4,7 @@ type Library struct {
 	playlists []PlaylistEntry
 	tracks    []TrackEntry
 	artists   []ArtistEntry
+	search    []TrackEntry
 	cursors   [4]int
 	active    Tab
 }
@@ -22,6 +23,20 @@ func (l *Library) SetTracks(t []TrackEntry) {
 
 func (l *Library) SetArtists(a []ArtistEntry) {
 	l.artists = a
+}
+
+func (l *Library) SetSearchResults(t []TrackEntry) {
+	l.search = t
+	if l.cursors[TabSearch] >= len(l.search) {
+		l.cursors[TabSearch] = len(l.search) - 1
+	}
+	if l.cursors[TabSearch] < 0 {
+		l.cursors[TabSearch] = 0
+	}
+}
+
+func (l *Library) SearchResultCount() int {
+	return len(l.search)
 }
 
 func (l *Library) ActiveTab() Tab {
@@ -61,6 +76,11 @@ func (l *Library) SelectedURI() string {
 			return ""
 		}
 		return l.tracks[cur].URI
+	case TabSearch:
+		if cur < 0 || cur >= len(l.search) {
+			return ""
+		}
+		return l.search[cur].URI
 	}
 	return ""
 }
@@ -74,7 +94,7 @@ func (l *Library) listLen() int {
 	case TabArtists:
 		return len(l.artists)
 	case TabSearch:
-		return 0
+		return len(l.search)
 	}
 	return 0
 }

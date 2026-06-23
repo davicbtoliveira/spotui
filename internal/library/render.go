@@ -17,6 +17,9 @@ func (l *Library) View(width, height int) string {
 	case TabArtists:
 		return renderArtists(width, height, l.cursors[l.active], l.artists)
 	case TabSearch:
+		if len(l.search) > 0 {
+			return renderTracks(width, height, l.cursors[l.active], l.search)
+		}
 		return renderSearchEmpty()
 	}
 	return ""
