@@ -17,6 +17,10 @@ func TranslatePlaylist(pl spotify.SimplePlaylist) library.PlaylistEntry {
 }
 
 func TranslateTrack(t spotify.SavedTrack) library.TrackEntry {
+	return TranslateFullTrack(t.FullTrack)
+}
+
+func TranslateFullTrack(t spotify.FullTrack) library.TrackEntry {
 	artistNames := make([]string, len(t.Artists))
 	for i, a := range t.Artists {
 		artistNames[i] = a.Name
