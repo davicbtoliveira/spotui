@@ -34,6 +34,9 @@ On first launch a browser window opens for Spotify login. After authorizing, the
 | `1` | Playlists tab |
 | `2` | Tracks tab |
 | `3` | Artists tab |
+| `4` | Search tab |
+| `/` | Search tracks |
+| `esc` | Cancel search input |
 | `j` / `↓` | Cursor down |
 | `k` / `↑` | Cursor up |
 | `enter` | Play selected |

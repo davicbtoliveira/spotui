@@ -1,6 +1,8 @@
 package tui
 
 import (
+	"strings"
+
 	"github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/dcbto/spotui/internal/auth"
@@ -15,7 +17,7 @@ import (
 type appState int
 
 const (
-	stateAuth    appState = iota
+	stateAuth appState = iota
 	stateLoading
 	stateReady
 )
@@ -39,6 +41,9 @@ type RootModel struct {
 	statusMsg   string
 	statusIsErr bool
 	showHelp    bool
+
+	searchInputActive bool
+	searchQuery       string
 
 	loadedFlags int
 }
@@ -181,8 +186,36 @@ func (m RootModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
+	if msg.String() == KeyQuit {
+		return m, tea.Quit
+	}
+
+	if m.state == stateReady && m.searchInputActive {
+		switch msg.Type {
+		case tea.KeyRunes:
+			m.searchQuery += string(msg.Runes)
+			return m, nil
+		case tea.KeySpace:
+			m.searchQuery += " "
+			return m, nil
+		case tea.KeyBackspace, tea.KeyCtrlH:
+			runes := []rune(m.searchQuery)
+			if len(runes) > 0 {
+				m.searchQuery = string(runes[:len(runes)-1])
+			}
+			return m, nil
+		case tea.KeyEsc:
+			m.searchInputActive = false
+			return m, nil
+		case tea.KeyEnter:
+			if strings.TrimSpace(m.searchQuery) == "" {
+				return m, nil
+			}
+		}
+	}
+
 	switch msg.String() {
-	case KeyQuit, KeyQuitAlt:
+	case KeyQuitAlt:
 		return m, tea.Quit
 	case KeyHelp:
 		m.showHelp = true
@@ -202,6 +235,13 @@ func (m RootModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case KeyTab3:
 		m.library.SetActiveTab(library.TabArtists)
+		return m, nil
+	case KeyTab4:
+		m.library.SetActiveTab(library.TabSearch)
+		return m, nil
+	case KeySearch:
+		m.library.SetActiveTab(library.TabSearch)
+		m.searchInputActive = true
 		return m, nil
 
 	case KeySpace:
@@ -294,6 +334,9 @@ func (m RootModel) renderMain() string {
 	}
 
 	libraryContent := m.library.View(m.width, libraryH)
+	if m.library.ActiveTab() == library.TabSearch && m.searchInputActive {
+		libraryContent = theme.NormalItemStyle.Render("  Search: " + m.searchQuery)
+	}
 	lib := lipgloss.NewStyle().Height(libraryH).Width(m.width).Render(libraryContent)
 
 	rows := []string{header, tabBar, lib}

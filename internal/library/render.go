@@ -16,12 +16,14 @@ func (l *Library) View(width, height int) string {
 		return renderTracks(width, height, l.cursors[l.active], l.tracks)
 	case TabArtists:
 		return renderArtists(width, height, l.cursors[l.active], l.artists)
+	case TabSearch:
+		return renderSearchEmpty()
 	}
 	return ""
 }
 
 func (l *Library) TabBar(width int) string {
-	labels := []string{"Playlists", "Tracks", "Artists"}
+	labels := []string{"Playlists", "Tracks", "Artists", "Search"}
 	rendered := make([]string, len(labels))
 	for i, label := range labels {
 		if Tab(i) == l.active {
@@ -33,6 +35,10 @@ func (l *Library) TabBar(width int) string {
 	bar := "  " + strings.Join(rendered, "  ")
 	divider := theme.DividerStyle.Render(strings.Repeat("─", width))
 	return bar + "\n" + divider
+}
+
+func renderSearchEmpty() string {
+	return theme.SubtextStyle.Render("  Press / to search tracks")
 }
 
 func renderPlaylists(width, height, cursor int, playlists []PlaylistEntry) string {

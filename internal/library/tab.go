@@ -6,4 +6,5 @@ const (
 	TabPlaylists Tab = iota
 	TabTracks
 	TabArtists
+	TabSearch
 )

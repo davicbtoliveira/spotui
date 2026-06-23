@@ -4,7 +4,7 @@ type Library struct {
 	playlists []PlaylistEntry
 	tracks    []TrackEntry
 	artists   []ArtistEntry
-	cursors   [3]int
+	cursors   [4]int
 	active    Tab
 }
 
@@ -73,6 +73,8 @@ func (l *Library) listLen() int {
 		return len(l.tracks)
 	case TabArtists:
 		return len(l.artists)
+	case TabSearch:
+		return 0
 	}
 	return 0
 }
