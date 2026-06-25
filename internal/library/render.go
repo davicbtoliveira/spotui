@@ -25,21 +25,6 @@ func (l *Library) View(width, height int) string {
 	return ""
 }
 
-func (l *Library) TabBar(width int) string {
-	labels := []string{"Playlists", "Tracks", "Artists", "Search"}
-	rendered := make([]string, len(labels))
-	for i, label := range labels {
-		if Tab(i) == l.active {
-			rendered[i] = theme.ActiveTabStyle.Render(label)
-		} else {
-			rendered[i] = theme.InactiveTabStyle.Render(label)
-		}
-	}
-	bar := "  " + strings.Join(rendered, "  ")
-	divider := theme.DividerStyle.Render(strings.Repeat("─", width))
-	return bar + "\n" + divider
-}
-
 func renderSearchEmpty() string {
 	return theme.SubtextStyle.Render("  Press / to search tracks")
 }
@@ -58,7 +43,7 @@ func renderPlaylists(width, height, cursor int, playlists []PlaylistEntry) strin
 		prefix := "  "
 		nameStyle := theme.NormalItemStyle
 		if i == cursor {
-			prefix = "▶ "
+			prefix = "▸ "
 			nameStyle = theme.SelectedItemStyle
 		}
 
@@ -94,7 +79,7 @@ func renderTracks(width, height, cursor int, tracks []TrackEntry) string {
 		nameStyle := theme.NormalItemStyle
 		artStyle := theme.SubtextStyle
 		if i == cursor {
-			prefix = "▶ "
+			prefix = "▸ "
 			nameStyle = theme.SelectedItemStyle
 			artStyle = theme.ArtistNameStyle
 		}
@@ -137,7 +122,7 @@ func renderArtists(width, height, cursor int, artists []ArtistEntry) string {
 		prefix := "  "
 		nameStyle := theme.NormalItemStyle
 		if i == cursor {
-			prefix = "▶ "
+			prefix = "▸ "
 			nameStyle = theme.SelectedItemStyle
 		}
 

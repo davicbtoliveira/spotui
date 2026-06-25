@@ -31,9 +31,9 @@ func RenderHelpOverlay(width, height int) string {
 
 	box := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(theme.ColorGreen).
+		BorderForeground(theme.ColorAmber).
 		Padding(1, 2).
-		Foreground(theme.ColorWhite).
+		Foreground(theme.ColorText).
 		Render(help)
 
 	return lipgloss.Place(width, height, lipgloss.Center, lipgloss.Center, box)

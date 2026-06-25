@@ -323,7 +323,7 @@ func (m RootModel) View() string {
 	switch m.state {
 	case stateAuth:
 		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center,
-			theme.AppTitleStyle.Render("Opening Spotify login in your browser..."))
+			theme.TopBarTitle.Render("Opening Spotify login in your browser..."))
 	case stateLoading:
 		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center,
 			theme.SubtextStyle.Render("Loading your library..."))
@@ -338,15 +338,13 @@ func (m RootModel) renderMain() string {
 		return views.RenderHelpOverlay(m.width, m.height)
 	}
 
-	header := views.RenderHeader(m.width, m.username, false)
-	tabBar := m.library.TabBar(m.width)
+	topBar := views.RenderTopBar(m.width, m.username, m.library.ActiveTab())
 	player := views.RenderPlayer(m.width, m.nowPlaying, m.shuffleOn, m.localProgressMs)
 
-	headerH := lipgloss.Height(header)
-	tabBarH := lipgloss.Height(tabBar)
+	topBarH := lipgloss.Height(topBar)
 	playerH := lipgloss.Height(player)
 
-	libraryH := m.height - headerH - tabBarH - playerH
+	libraryH := m.height - topBarH - playerH
 	if m.statusMsg != "" {
 		libraryH--
 	}
@@ -356,20 +354,20 @@ func (m RootModel) renderMain() string {
 
 	libraryContent := m.library.View(m.width, libraryH)
 	if m.library.ActiveTab() == library.TabSearch && m.searchInputActive {
-		libraryContent = theme.NormalItemStyle.Render("  Search: " + m.searchQuery)
+		libraryContent = "  " + theme.ActiveTabStyle.Render("Search: " + m.searchQuery)
 	} else if m.library.ActiveTab() == library.TabSearch && m.searchLoading {
-		loading := theme.SubtextStyle.Render("  Searching tracks...")
+		loading := "  " + theme.SubtextStyle.Render("Searching tracks...")
 		if m.library.SearchResultCount() > 0 {
 			libraryContent = lipgloss.JoinVertical(lipgloss.Left, loading, libraryContent)
 		} else {
 			libraryContent = loading
 		}
 	} else if m.library.ActiveTab() == library.TabSearch && m.searchCompleted && m.library.SearchResultCount() == 0 {
-		libraryContent = theme.SubtextStyle.Render("  No tracks found")
+		libraryContent = "  " + theme.SubtextStyle.Render("No tracks found")
 	}
 	lib := lipgloss.NewStyle().Height(libraryH).Width(m.width).Render(libraryContent)
 
-	rows := []string{header, tabBar, lib}
+	rows := []string{topBar, lib}
 
 	if m.statusMsg != "" {
 		var statusLine string

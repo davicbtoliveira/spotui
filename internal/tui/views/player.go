@@ -11,15 +11,13 @@ import (
 )
 
 func RenderPlayer(width int, state *spotify.PlayerState, shuffleOn bool, localProgressMs int) string {
-	divider := theme.DividerStyle.Render(strings.Repeat("─", width))
-
 	if state == nil || state.Item == nil {
-		content := lipgloss.JoinVertical(lipgloss.Left,
-			divider,
-			theme.SubtextStyle.Render("  No active device — open Spotify on a device first"),
-			"",
-			"  "+theme.SubtextStyle.Render("[⏮]  [▶]  [⏭]"),
-		)
+		msg := theme.SubtextStyle.Render("  No active device — open Spotify on a device first")
+		pad := width - lipgloss.Width(msg) - 2
+		if pad < 0 {
+			pad = 0
+		}
+		content := msg + strings.Repeat(" ", pad)
 		return theme.PlayerBarStyle.Copy().Width(width).Render(content)
 	}
 
@@ -29,65 +27,73 @@ func RenderPlayer(width int, state *spotify.PlayerState, shuffleOn bool, localPr
 		artists[i] = a.Name
 	}
 
-	trackName := theme.TrackNameStyle.Render(truncate(track.Name, width/2))
-	artistStr := theme.ArtistNameStyle.Render(truncate(strings.Join(artists, ", "), width/3))
-	albumStr := theme.SubtextStyle.Render(truncate(track.Album.Name, width/2))
-
-	barWidth := width - 14
-	if barWidth < 10 {
-		barWidth = 10
-	}
-	progressMs := localProgressMs
-	if progressMs == 0 {
-		progressMs = int(state.Progress)
-	}
-	progressBar := renderProgress(barWidth, progressMs, int(track.Duration))
-	elapsed := formatDuration(progressMs)
-	total := formatDuration(int(track.Duration))
-	timeLabel := theme.SubtextStyle.Render(elapsed + "/" + total)
+	artistStr := strings.Join(artists, ", ")
 
 	playPause := "▶"
 	if state.Playing {
 		playPause = "⏸"
 	}
-	controls := fmt.Sprintf("  [⏮]  [%s]  [⏭]", playPause)
 
-	shuffleLabel := theme.ShuffleOffStyle.Render("🔀 OFF")
+	shuffleLabel := theme.ShuffleOffStyle.Render("  🔀")
 	if shuffleOn {
-		shuffleLabel = theme.ShuffleOnStyle.Render("🔀 ON ")
+		shuffleLabel = theme.ShuffleOnStyle.Render("  🔀")
 	}
 
-	line1 := "  " + trackName + theme.SubtextStyle.Render("  ·  ") + artistStr
-	line2 := "  " + albumStr
-	line3 := "  " + progressBar + "  " + timeLabel
-	line4 := controls + "      " + shuffleLabel
+	controls := fmt.Sprintf("  %s  %s  %s", theme.SubtextStyle.Render("⏮"), theme.TrackNameStyle.Render(playPause), theme.SubtextStyle.Render("⏭"))
 
-	content := lipgloss.JoinVertical(lipgloss.Left,
-		divider,
-		line1,
-		line2,
-		line3,
-		line4,
-	)
+	totalDur := formatDuration(int(track.Duration))
 
+	progressMs := localProgressMs
+	if progressMs == 0 {
+		progressMs = int(state.Progress)
+	}
+	elapsed := formatDuration(progressMs)
+	timeStr := theme.SubtextStyle.Render(elapsed + "/" + totalDur)
+	timeWidth := lipgloss.Width(timeStr)
+
+	progressBarWidth := width - timeWidth - 6
+	if progressBarWidth < 5 {
+		progressBarWidth = 5
+	}
+	bar := renderProgress(progressBarWidth, progressMs, int(track.Duration))
+	progressLine := "  " + bar + "  " + timeStr
+
+	trackInfo := truncate(track.Name, width/3)
+	artistInfo := truncate(artistStr, width/3)
+
+	leftLabel := theme.TrackNameStyle.Render(trackInfo)
+	metaLabel := theme.ArtistNameStyle.Render(artistInfo)
+	left := "  " + leftLabel + theme.SubtextStyle.Render(" · ") + metaLabel
+
+	right := controls + shuffleLabel
+
+	leftW := lipgloss.Width(left)
+	rightW := lipgloss.Width(right)
+	gap := width - 2 - leftW - rightW
+	if gap < 1 {
+		gap = 1
+	}
+
+	line1 := left + strings.Repeat(" ", gap) + right
+
+	content := lipgloss.JoinVertical(lipgloss.Left, line1, progressLine)
 	return theme.PlayerBarStyle.Copy().Width(width).Render(content)
 }
 
 func renderProgress(width, progress, total int) string {
 	if total <= 0 {
-		return theme.ProgressEmptyStyle.Render(strings.Repeat("─", width))
+		return theme.ProgressEmptyStyle.Render(strings.Repeat("░", width))
 	}
 	if progress > total {
 		progress = total
 	}
 	filled := int(float64(width) * float64(progress) / float64(total))
-	empty := width - filled - 1
+	empty := width - filled
 	if empty < 0 {
 		empty = 0
 	}
-	return theme.ProgressStyle.Render(strings.Repeat("─", filled)) +
-		theme.ProgressStyle.Render("●") +
-		theme.ProgressEmptyStyle.Render(strings.Repeat("─", empty))
+	return theme.ProgressStyle.Render(strings.Repeat("█", filled)) +
+		theme.ProgressEmptyStyle.Render(strings.Repeat("░", empty))
 }
 
 func formatDuration(ms int) string {

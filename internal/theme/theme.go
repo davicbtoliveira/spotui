@@ -3,84 +3,74 @@ package theme
 import "github.com/charmbracelet/lipgloss"
 
 var (
-	ColorGreen = lipgloss.Color("#1DB954")
-	ColorBlack = lipgloss.Color("#191414")
-	ColorWhite = lipgloss.Color("#FFFFFF")
-	ColorGray  = lipgloss.Color("#535353")
-	ColorLGray = lipgloss.Color("#B3B3B3")
-	ColorDGray = lipgloss.Color("#282828")
+	ColorBG      = lipgloss.Color("#1A1817")
+	ColorSurface = lipgloss.Color("#252220")
+	ColorAmber   = lipgloss.Color("#E8A838")
+	ColorText    = lipgloss.Color("#E8E0D5")
+	ColorMuted   = lipgloss.Color("#8A7E72")
+	ColorDim     = lipgloss.Color("#5A5250")
+	ColorRose    = lipgloss.Color("#C4526E")
 )
 
 var (
-	HeaderStyle = lipgloss.NewStyle().
-			Foreground(ColorWhite).
-			Background(ColorDGray).
+	TopBarStyle = lipgloss.NewStyle().
+			Background(ColorSurface).
 			Padding(0, 1)
 
-	AppTitleStyle = lipgloss.NewStyle().
-			Foreground(ColorGreen).
+	TopBarTitle = lipgloss.NewStyle().
+			Foreground(ColorAmber).
 			Bold(true)
 
-	UsernameStyle = lipgloss.NewStyle().
-			Foreground(ColorLGray)
-
-	SettingsBtnStyle = lipgloss.NewStyle().
-				Foreground(ColorGreen).
-				Border(lipgloss.RoundedBorder()).
-				BorderForeground(ColorGray).
-				Padding(0, 1)
+	TopBarUser = lipgloss.NewStyle().
+			Foreground(ColorMuted)
 
 	ActiveTabStyle = lipgloss.NewStyle().
-			Foreground(ColorGreen).
-			Bold(true).
-			Border(lipgloss.NormalBorder(), false, false, true, false).
-			BorderForeground(ColorGreen).
-			Padding(0, 1)
+			Foreground(ColorAmber).
+			Bold(true)
 
 	InactiveTabStyle = lipgloss.NewStyle().
-				Foreground(ColorGray).
-				Padding(0, 1)
+				Foreground(ColorDim)
 
 	SelectedItemStyle = lipgloss.NewStyle().
-				Foreground(ColorGreen).
+				Foreground(ColorAmber).
 				Bold(true)
 
 	NormalItemStyle = lipgloss.NewStyle().
-			Foreground(ColorWhite)
+			Foreground(ColorText)
 
 	SubtextStyle = lipgloss.NewStyle().
-			Foreground(ColorLGray)
+			Foreground(ColorMuted)
 
 	ArtistNameStyle = lipgloss.NewStyle().
-			Foreground(ColorLGray)
+			Foreground(ColorMuted)
 
 	PlayerBarStyle = lipgloss.NewStyle().
-			Background(ColorDGray).
+			Background(ColorSurface).
 			Padding(0, 1)
 
 	TrackNameStyle = lipgloss.NewStyle().
-			Foreground(ColorWhite).
+			Foreground(ColorText).
 			Bold(true)
 
 	ProgressStyle = lipgloss.NewStyle().
-			Foreground(ColorGreen)
+			Foreground(ColorAmber)
 
 	ProgressEmptyStyle = lipgloss.NewStyle().
-				Foreground(ColorGray)
+				Foreground(ColorDim)
 
 	ShuffleOnStyle = lipgloss.NewStyle().
-			Foreground(ColorGreen)
+			Foreground(ColorRose)
 
 	ShuffleOffStyle = lipgloss.NewStyle().
-			Foreground(ColorGray)
+			Foreground(ColorDim)
 
 	DividerStyle = lipgloss.NewStyle().
-			Foreground(ColorGray)
+			Foreground(ColorDim)
 
 	ErrorStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#FF5555")).
+			Foreground(ColorRose).
 			Bold(true)
 
 	StatusStyle = lipgloss.NewStyle().
-			Foreground(ColorLGray)
+			Foreground(ColorMuted)
 )
