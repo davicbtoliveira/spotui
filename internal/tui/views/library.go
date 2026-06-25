@@ -15,6 +15,7 @@ func RenderHelpOverlay(width, height int) string {
 		"",
 		"  1 / 2 / 3 / 4 Switch tabs (Playlists / Tracks / Artists / Search)",
 		"  /            Search tracks",
+		"  [ / ]        Previous / next search page",
 		"  esc          Cancel search input",
 		"  j / ↓        Move cursor down",
 		"  k / ↑        Move cursor up",

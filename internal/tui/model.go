@@ -48,6 +48,8 @@ type RootModel struct {
 	searchQuery       string
 	searchLoading     bool
 	searchCompleted   bool
+	searchOffset      int
+	searchTotal       int
 
 	loadedFlags int
 }
@@ -133,6 +135,8 @@ func (m RootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.library.SetSearchResults(translated)
 		m.searchLoading = false
 		m.searchCompleted = true
+		m.searchOffset = msg.Offset
+		m.searchTotal = msg.Total
 		return m, nil
 
 	case ArtistsLoadedMsg:
@@ -231,7 +235,9 @@ func (m RootModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 			m.searchInputActive = false
 			m.searchLoading = true
-			return m, commands.CmdSearchTracks(m.trackSearcher, m.searchQuery)
+			m.searchCompleted = false
+			m.searchOffset = 0
+			return m, commands.CmdSearchTracks(m.trackSearcher, m.searchQuery, 0)
 		}
 	}
 
@@ -282,6 +288,26 @@ func (m RootModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		auth.OpenSpotifySettings()
 		return m, nil
 
+	case KeySearchNext:
+		if m.library.ActiveTab() == library.TabSearch && m.searchCompleted && !m.searchLoading {
+			nextOffset := m.searchOffset + commands.TrackSearchLimit
+			if nextOffset < m.searchTotal {
+				m.searchLoading = true
+				m.searchOffset = nextOffset
+				return m, commands.CmdSearchTracks(m.trackSearcher, m.searchQuery, nextOffset)
+			}
+		}
+		return m, nil
+	case KeySearchPrev:
+		if m.library.ActiveTab() == library.TabSearch && m.searchCompleted && !m.searchLoading {
+			prevOffset := m.searchOffset - commands.TrackSearchLimit
+			if prevOffset >= 0 {
+				m.searchLoading = true
+				m.searchOffset = prevOffset
+				return m, commands.CmdSearchTracks(m.trackSearcher, m.searchQuery, prevOffset)
+			}
+		}
+		return m, nil
 	case KeyUp, KeyUpAlt:
 		m.library.MoveUp()
 		return m, nil
@@ -356,7 +382,11 @@ func (m RootModel) renderMain() string {
 	if m.library.ActiveTab() == library.TabSearch && m.searchInputActive {
 		libraryContent = "  " + theme.ActiveTabStyle.Render("Search: " + m.searchQuery)
 	} else if m.library.ActiveTab() == library.TabSearch && m.searchLoading {
-		loading := "  " + theme.SubtextStyle.Render("Searching tracks...")
+		loadingText := "Searching tracks..."
+		if m.searchCompleted {
+			loadingText = "Loading more tracks..."
+		}
+		loading := "  " + theme.SubtextStyle.Render(loadingText)
 		if m.library.SearchResultCount() > 0 {
 			libraryContent = lipgloss.JoinVertical(lipgloss.Left, loading, libraryContent)
 		} else {

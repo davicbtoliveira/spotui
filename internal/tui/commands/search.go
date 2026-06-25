@@ -9,18 +9,19 @@ import (
 	"github.com/zmb3/spotify/v2"
 )
 
-const trackSearchLimit = 10
+const TrackSearchLimit = 10
 
-func CmdSearchTracks(searcher spotifyapi.TrackSearcher, query string) tea.Cmd {
+func CmdSearchTracks(searcher spotifyapi.TrackSearcher, query string, offset int) tea.Cmd {
 	return func() tea.Msg {
 		page, err := searcher.SearchTracks(context.Background(), spotifyapi.TrackSearchRequest{
 			Query:  query,
-			Limit:  trackSearchLimit,
+			Limit:  TrackSearchLimit,
 			Market: spotify.MarketFromToken,
+			Offset: offset,
 		})
 		if err != nil {
 			return msgs.ErrMsg{Err: err, Context: "search tracks"}
 		}
-		return msgs.TrackSearchLoadedMsg{Tracks: page.Tracks, Total: page.Total}
+		return msgs.TrackSearchLoadedMsg{Tracks: page.Tracks, Total: page.Total, Offset: page.Offset}
 	}
 }

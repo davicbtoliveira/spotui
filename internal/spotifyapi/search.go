@@ -10,11 +10,13 @@ type TrackSearchRequest struct {
 	Query  string
 	Limit  int
 	Market string
+	Offset int
 }
 
 type TrackSearchPage struct {
 	Tracks []spotify.FullTrack
 	Total  int
+	Offset int
 }
 
 type TrackSearcher interface {
@@ -32,6 +34,7 @@ func (s SpotifyTrackSearcher) SearchTracks(ctx context.Context, req TrackSearchR
 		spotify.SearchTypeTrack,
 		spotify.Limit(req.Limit),
 		spotify.Market(req.Market),
+		spotify.Offset(req.Offset),
 	)
 	if err != nil {
 		return TrackSearchPage{}, err
@@ -42,5 +45,6 @@ func (s SpotifyTrackSearcher) SearchTracks(ctx context.Context, req TrackSearchR
 	return TrackSearchPage{
 		Tracks: result.Tracks.Tracks,
 		Total:  int(result.Tracks.Total),
+		Offset: int(result.Tracks.Offset),
 	}, nil
 }

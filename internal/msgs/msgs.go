@@ -29,6 +29,7 @@ type TracksLoadedMsg struct {
 type TrackSearchLoadedMsg struct {
 	Tracks []spotify.FullTrack
 	Total  int
+	Offset int
 }
 
 type ArtistsLoadedMsg struct {

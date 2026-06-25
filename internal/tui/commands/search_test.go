@@ -39,7 +39,7 @@ func (f *fakeTrackSearcher) SearchTracks(_ context.Context, req spotifyapi.Track
 func TestCmdSearchTracksUsesSpotifyTrackSearch(t *testing.T) {
 	searcher := &fakeTrackSearcher{}
 
-	msg := commands.CmdSearchTracks(searcher, "track:Hello artist:Adele")()
+	msg := commands.CmdSearchTracks(searcher, "track:Hello artist:Adele", 0)()
 
 	if searcher.req.Query != "track:Hello artist:Adele" {
 		t.Fatalf("Query: want raw query, got %q", searcher.req.Query)
@@ -59,10 +59,20 @@ func TestCmdSearchTracksUsesSpotifyTrackSearch(t *testing.T) {
 	}
 }
 
+func TestCmdSearchTracksPassesOffset(t *testing.T) {
+	searcher := &fakeTrackSearcher{}
+
+	commands.CmdSearchTracks(searcher, "hello", 20)()
+
+	if searcher.req.Offset != 20 {
+		t.Fatalf("Offset: want 20, got %d", searcher.req.Offset)
+	}
+}
+
 func TestCmdSearchTracksReturnsSearchErrorContext(t *testing.T) {
 	searcher := &fakeTrackSearcher{err: errors.New("rate limited")}
 
-	msg := commands.CmdSearchTracks(searcher, "hello")()
+	msg := commands.CmdSearchTracks(searcher, "hello", 0)()
 
 	got, ok := msg.(msgs.ErrMsg)
 	if !ok {
@@ -89,7 +99,7 @@ func TestCmdSearchTracksUsesValidSpotifySearchLimit(t *testing.T) {
 
 	client := spotify.New(server.Client(), spotify.WithBaseURL(server.URL+"/"))
 
-	msg := commands.CmdSearchTracks(spotifyapi.SpotifyTrackSearcher{Client: client}, "hello")()
+	msg := commands.CmdSearchTracks(spotifyapi.SpotifyTrackSearcher{Client: client}, "hello", 0)()
 
 	if _, ok := msg.(msgs.TrackSearchLoadedMsg); !ok {
 		t.Fatalf("message: want TrackSearchLoadedMsg, got %T: %#v", msg, msg)

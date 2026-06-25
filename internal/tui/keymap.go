@@ -18,5 +18,7 @@ const (
 	KeyShuffle  = "s"
 	KeySettings = "c"
 	KeyHelp     = "?"
-	KeySearch   = "/"
+	KeySearch     = "/"
+	KeySearchNext = "]"
+	KeySearchPrev = "["
 )
