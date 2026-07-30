@@ -49,7 +49,7 @@ func (s *memoryAPIServer) Emit(event *daemon.ApiEvent) {
 			ContextURI: data.ContextUri,
 			URI:        data.Uri,
 		}
-	case daemon.ApiEventTypeStopped, daemon.ApiEventTypeNotPlaying:
+	case daemon.ApiEventTypeStopped:
 		translated.Type = EventTypeStopped
 	case daemon.ApiEventTypeActive:
 		translated.Type = EventTypeActive

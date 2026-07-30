@@ -232,6 +232,34 @@ func TestAdapterTranslatesPlaybackEvents(t *testing.T) {
 	}
 }
 
+func TestAdapterDoesNotStopBetweenAutomaticallyAdvancedTracks(t *testing.T) {
+	server := newMemoryAPIServer()
+	adapter := newAdapter(newLifecycleRuntime(), server)
+
+	server.Emit(&daemon.ApiEvent{
+		Type: daemon.ApiEventTypeNotPlaying,
+		Data: daemon.ApiEventDataNotPlaying{
+			ContextUri: "spotify:album:25",
+			Uri:        "spotify:track:hello",
+		},
+	})
+	server.Emit(&daemon.ApiEvent{
+		Type: daemon.ApiEventTypeMetadata,
+		Data: daemon.ApiEventDataMetadata{
+			Uri:         "spotify:track:skyfall",
+			Name:        "Skyfall",
+			ArtistNames: []string{"Adele"},
+			Duration:    286000,
+		},
+	})
+
+	event := <-adapter.Events()
+	if event.Type != EventTypeMetadata || event.Track == nil ||
+		event.Track.URI != "spotify:track:skyfall" {
+		t.Fatalf("first event after automatic advance: %#v", event)
+	}
+}
+
 func TestAdapterTranslatesAccountProductEvent(t *testing.T) {
 	server := newMemoryAPIServer()
 	adapter := newAdapter(newLifecycleRuntime(), server)
