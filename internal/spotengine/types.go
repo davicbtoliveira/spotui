@@ -2,7 +2,19 @@ package spotengine
 
 type EventType string
 
-const EventTypeMetadata EventType = "metadata"
+const (
+	EventTypeReady            EventType = "ready"
+	EventTypePlaying          EventType = "playing"
+	EventTypePaused           EventType = "paused"
+	EventTypeStopped          EventType = "stopped"
+	EventTypeActive           EventType = "active"
+	EventTypeInactive         EventType = "inactive"
+	EventTypeMetadata         EventType = "metadata"
+	EventTypeVolume           EventType = "volume"
+	EventTypeSeek             EventType = "seek"
+	EventTypeAuthorizationURL EventType = "authorization_url"
+	EventTypeError            EventType = "error"
+)
 
 type Track struct {
 	URI        string
@@ -13,6 +25,14 @@ type Track struct {
 }
 
 type Event struct {
-	Type  EventType
-	Track *Track
+	Type       EventType
+	Track      *Track
+	ContextURI string
+	URI        string
+	PositionMS int
+	DurationMS int
+	Volume     int
+	VolumeMax  int
+	URL        string
+	Err        error
 }
