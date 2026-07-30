@@ -5,19 +5,20 @@ import (
 	"os"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/dcbto/spotui/internal/clientid"
+	"github.com/dcbto/spotui/internal/auth"
+	"github.com/dcbto/spotui/internal/spotengine"
 	"github.com/dcbto/spotui/internal/tui"
 )
 
 func main() {
-	id, err := clientid.Resolve()
+	engine, err := spotengine.NewAdapter()
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
 
 	p := tea.NewProgram(
-		tui.NewRootModel(id),
+		tui.NewRootModel(engine, auth.OpenURL),
 		tea.WithAltScreen(),
 		tea.WithMouseCellMotion(),
 	)

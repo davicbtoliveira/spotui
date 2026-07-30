@@ -2,6 +2,7 @@ package msgs
 
 import (
 	"github.com/dcbto/spotui/internal/library"
+	"github.com/dcbto/spotui/internal/spotengine"
 	"github.com/zmb3/spotify/v2"
 )
 
@@ -50,3 +51,21 @@ type ErrMsg struct {
 type ClearStatusMsg struct{}
 
 type ProgressTickMsg struct{}
+
+type EngineStartedMsg struct{}
+
+type EngineStartErrMsg struct {
+	Err error
+}
+
+type EngineEventMsg struct {
+	Event spotengine.Event
+}
+
+type EngineEventsClosedMsg struct{}
+
+type BrowserOpenedMsg struct{}
+
+type BrowserOpenErrMsg struct {
+	Err error
+}

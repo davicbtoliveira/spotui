@@ -10,9 +10,155 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/dcbto/spotui/internal/library"
 	"github.com/dcbto/spotui/internal/msgs"
+	"github.com/dcbto/spotui/internal/spotengine"
 	"github.com/dcbto/spotui/internal/spotifyapi"
 	"github.com/zmb3/spotify/v2"
 )
+
+type modelBrowser struct {
+	urls []string
+}
+
+func (b *modelBrowser) Open(url string) error {
+	b.urls = append(b.urls, url)
+	return nil
+}
+
+func TestFirstStartWaitsOnLoggedOutScreen(t *testing.T) {
+	engine := spotengine.NewFake()
+	browser := &modelBrowser{}
+	m := NewRootModel(engine, browser.Open)
+	m.width = 80
+	m.height = 24
+
+	if cmd := m.Init(); cmd != nil {
+		t.Fatal("first start returned a command")
+	}
+	view := m.View()
+	for _, want := range []string{"SpotUI", "Spotify Premium", "Enter", "Log in"} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("logged-out screen missing %q:\n%s", want, view)
+		}
+	}
+	if len(browser.urls) != 0 {
+		t.Fatalf("browser opened on first start: %v", browser.urls)
+	}
+	if calls := engine.Calls(); len(calls) != 0 {
+		t.Fatalf("engine called on first start: %#v", calls)
+	}
+}
+
+func TestEnterStartsExactlyOneLogin(t *testing.T) {
+	engine := spotengine.NewFake()
+	m := NewRootModel(engine, (&modelBrowser{}).Open)
+
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = updated.(RootModel)
+	if cmd == nil {
+		t.Fatal("Enter returned no Login command")
+	}
+	if _, ok := cmd().(msgs.EngineStartedMsg); !ok {
+		t.Fatal("Login command did not start Playback Engine")
+	}
+
+	_, duplicate := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if duplicate != nil {
+		t.Fatal("second Enter started another Login command")
+	}
+	calls := engine.Calls()
+	if len(calls) != 1 || calls[0].Operation != spotengine.OperationStart {
+		t.Fatalf("engine calls: %#v", calls)
+	}
+}
+
+func TestAuthorizationURLHookOpensBrowser(t *testing.T) {
+	engine := spotengine.NewFake()
+	browser := &modelBrowser{}
+	m := NewRootModel(engine, browser.Open)
+
+	updated, startCmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = updated.(RootModel)
+	updated, waitCmd := m.Update(startCmd())
+	m = updated.(RootModel)
+	if waitCmd == nil {
+		t.Fatal("engine start did not wait for authorization event")
+	}
+
+	const authURL = "https://accounts.spotify.com/authorize?code_challenge=test"
+	engine.Emit(spotengine.Event{Type: spotengine.EventTypeAuthorizationURL, URL: authURL})
+	eventMsg := waitCmd()
+	if _, ok := eventMsg.(msgs.EngineEventMsg); !ok {
+		t.Fatalf("event command: want EngineEventMsg, got %T", eventMsg)
+	}
+
+	updated, openCmd := m.Update(eventMsg)
+	m = updated.(RootModel)
+	if openCmd == nil {
+		t.Fatal("authorization event returned no browser command")
+	}
+	if _, ok := openCmd().(msgs.BrowserOpenedMsg); !ok {
+		t.Fatal("browser command did not report success")
+	}
+	if len(browser.urls) != 1 || browser.urls[0] != authURL {
+		t.Fatalf("browser URLs: %v", browser.urls)
+	}
+}
+
+func TestSuccessfulPremiumLoginReachesReadyState(t *testing.T) {
+	engine := spotengine.NewFake()
+	m := NewRootModel(engine, (&modelBrowser{}).Open)
+	m.state = stateAuthenticating
+	m.width = 80
+	m.height = 24
+
+	updated, cmd := m.Update(msgs.EngineEventMsg{
+		Event: spotengine.Event{Type: spotengine.EventTypeReady},
+	})
+	m = updated.(RootModel)
+
+	if m.state != stateReady {
+		t.Fatalf("state: want ready, got %v", m.state)
+	}
+	if cmd == nil {
+		t.Fatal("ready state stopped listening for engine events")
+	}
+	if view := m.View(); strings.Contains(view, "Waiting for Spotify authorization") {
+		t.Fatalf("ready view remains authenticating:\n%s", view)
+	}
+	for _, call := range engine.Calls() {
+		if call.Operation == spotengine.OperationPlay {
+			t.Fatalf("successful Login resumed audio: %#v", engine.Calls())
+		}
+	}
+}
+
+func TestValidLocalSessionRestoresWithoutBrowserOrAudio(t *testing.T) {
+	engine := spotengine.NewFake()
+	engine.SetHasSession(true)
+	browser := &modelBrowser{}
+	m := NewRootModel(engine, browser.Open)
+
+	startCmd := m.Init()
+	if startCmd == nil {
+		t.Fatal("valid Local Session did not start restoration")
+	}
+	updated, waitCmd := m.Update(startCmd())
+	m = updated.(RootModel)
+	engine.Emit(spotengine.Event{Type: spotengine.EventTypeReady})
+	updated, _ = m.Update(waitCmd())
+	m = updated.(RootModel)
+
+	if m.state != stateReady {
+		t.Fatalf("state: want ready, got %v", m.state)
+	}
+	if len(browser.urls) != 0 {
+		t.Fatalf("restoration opened browser: %v", browser.urls)
+	}
+	calls := engine.Calls()
+	if len(calls) != 1 || calls[0].Operation != spotengine.OperationStart {
+		t.Fatalf("restoration engine calls: %#v", calls)
+	}
+}
 
 type modelTrackSearcher struct {
 	req spotifyapi.TrackSearchRequest
@@ -30,7 +176,7 @@ func (s *modelTrackSearcher) SearchTracks(_ context.Context, req spotifyapi.Trac
 }
 
 func newReadyModel() RootModel {
-	m := NewRootModel("")
+	m := NewRootModel(spotengine.NewFake(), func(string) error { return nil })
 	m.state = stateReady
 	m.client = &spotify.Client{}
 	m.width = 80

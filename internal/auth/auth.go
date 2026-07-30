@@ -64,7 +64,7 @@ func generateState() (string, error) {
 	return base64.RawURLEncoding.EncodeToString(b), nil
 }
 
-func openBrowser(url string) {
+func OpenURL(url string) error {
 	var cmd *exec.Cmd
 	switch runtime.GOOS {
 	case "linux":
@@ -74,9 +74,13 @@ func openBrowser(url string) {
 	case "windows":
 		cmd = exec.Command("rundll32", "url.dll,FileProtocolHandler", url)
 	default:
-		return
+		return fmt.Errorf("opening URLs is unsupported on %s", runtime.GOOS)
 	}
-	_ = cmd.Start()
+	return cmd.Start()
+}
+
+func openBrowser(url string) {
+	_ = OpenURL(url)
 }
 
 func waitForCallback(expectedState string) (string, error) {

@@ -7,6 +7,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/dcbto/spotui/internal/auth"
 	"github.com/dcbto/spotui/internal/library"
+	"github.com/dcbto/spotui/internal/spotengine"
 	"github.com/dcbto/spotui/internal/spotifyapi"
 	"github.com/dcbto/spotui/internal/theme"
 	"github.com/dcbto/spotui/internal/tui/commands"
@@ -17,16 +18,18 @@ import (
 type appState int
 
 const (
-	stateAuth appState = iota
+	stateLoggedOut appState = iota
+	stateAuthenticating
 	stateLoading
 	stateReady
 )
 
 type RootModel struct {
-	state    appState
-	width    int
-	height   int
-	clientID string
+	state   appState
+	width   int
+	height  int
+	engine  spotengine.Engine
+	openURL func(string) error
 
 	client *spotify.Client
 
@@ -62,16 +65,24 @@ const (
 	loadedAll       = loadedUser | loadedPlaylists | loadedTracks | loadedArtists
 )
 
-func NewRootModel(clientID string) RootModel {
-	return RootModel{
-		state:    stateAuth,
-		clientID: clientID,
-		library:  library.New(),
+func NewRootModel(engine spotengine.Engine, openURL func(string) error) RootModel {
+	model := RootModel{
+		state:   stateLoggedOut,
+		engine:  engine,
+		openURL: openURL,
+		library: library.New(),
 	}
+	if engine.HasSession() {
+		model.state = stateLoading
+	}
+	return model
 }
 
 func (m RootModel) Init() tea.Cmd {
-	return commands.CmdAuthenticate(m.clientID)
+	if m.state == stateLoading {
+		return commands.CmdStartEngine(m.engine)
+	}
+	return nil
 }
 
 func (m RootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -100,6 +111,21 @@ func (m RootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.statusMsg = "Auth failed: " + msg.Err.Error()
 		m.statusIsErr = true
 		return m, tea.Quit
+
+	case EngineStartedMsg:
+		return m, commands.CmdWaitEngineEvent(m.engine)
+
+	case EngineEventMsg:
+		switch msg.Event.Type {
+		case spotengine.EventTypeAuthorizationURL:
+			return m, commands.CmdOpenURL(m.openURL, msg.Event.URL)
+		case spotengine.EventTypeReady:
+			m.state = stateReady
+		}
+		return m, commands.CmdWaitEngineEvent(m.engine)
+
+	case BrowserOpenedMsg:
+		return m, commands.CmdWaitEngineEvent(m.engine)
 
 	case UserLoadedMsg:
 		if msg.User.DisplayName != "" {
@@ -241,6 +267,11 @@ func (m RootModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	}
 
+	if m.state == stateLoggedOut && msg.Type == tea.KeyEnter {
+		m.state = stateAuthenticating
+		return m, commands.CmdStartEngine(m.engine)
+	}
+
 	switch msg.String() {
 	case KeyQuitAlt:
 		return m, tea.Quit
@@ -347,9 +378,17 @@ func (m RootModel) View() string {
 	}
 
 	switch m.state {
-	case stateAuth:
+	case stateLoggedOut:
 		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center,
-			theme.TopBarTitle.Render("Opening Spotify login in your browser..."))
+			lipgloss.JoinVertical(lipgloss.Center,
+				theme.TopBarTitle.Render("SpotUI"),
+				theme.SubtextStyle.Render("Spotify Premium is required"),
+				theme.SubtextStyle.Render("Press Enter to Log in with Spotify"),
+				theme.SubtextStyle.Render("Press q to quit"),
+			))
+	case stateAuthenticating:
+		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center,
+			theme.SubtextStyle.Render("Waiting for Spotify authorization..."))
 	case stateLoading:
 		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center,
 			theme.SubtextStyle.Render("Loading your library..."))
@@ -380,7 +419,7 @@ func (m RootModel) renderMain() string {
 
 	libraryContent := m.library.View(m.width, libraryH)
 	if m.library.ActiveTab() == library.TabSearch && m.searchInputActive {
-		libraryContent = "  " + theme.ActiveTabStyle.Render("Search: " + m.searchQuery)
+		libraryContent = "  " + theme.ActiveTabStyle.Render("Search: "+m.searchQuery)
 	} else if m.library.ActiveTab() == library.TabSearch && m.searchLoading {
 		loadingText := "Searching tracks..."
 		if m.searchCompleted {
