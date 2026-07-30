@@ -9,6 +9,8 @@ type Operation string
 
 const (
 	OperationStart        Operation = "start"
+	OperationCancelLogin  Operation = "cancel_login"
+	OperationLogout       Operation = "logout"
 	OperationSearchTracks Operation = "search_tracks"
 	OperationPlay         Operation = "play"
 	OperationPause        Operation = "pause"
@@ -73,6 +75,18 @@ func (f *Fake) Play(_ context.Context, uri string) error {
 
 func (f *Fake) Start(_ context.Context) error {
 	return f.record(Call{Operation: OperationStart})
+}
+
+func (f *Fake) CancelLogin(_ context.Context) error {
+	return f.record(Call{Operation: OperationCancelLogin})
+}
+
+func (f *Fake) Logout(_ context.Context) error {
+	if err := f.record(Call{Operation: OperationLogout}); err != nil {
+		return err
+	}
+	f.SetHasSession(false)
+	return nil
 }
 
 func (f *Fake) SearchTracks(_ context.Context, request SearchRequest) (SearchPage, error) {

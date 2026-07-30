@@ -18,28 +18,37 @@ type engineRuntime interface {
 	Close() error
 }
 
+type attemptFactory func() (engineRuntime, *memoryAPIServer, error)
+
 type Adapter struct {
 	runtime    engineRuntime
 	server     *memoryAPIServer
+	factory    attemptFactory
+	clearState func() error
+	events     chan Event
 	hasSession bool
 
-	mu        sync.Mutex
-	cancel    context.CancelFunc
-	runDone   chan error
-	closeOnce sync.Once
-	closeDone chan struct{}
-	closeErr  error
+	mu         sync.Mutex
+	cancel     context.CancelFunc
+	runDone    chan error
+	stopDone   chan struct{}
+	stopErr    error
+	closed     bool
+	eventsOnce sync.Once
 }
 
 func (a *Adapter) HasSession() bool {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+
 	return a.hasSession
 }
 
 func newAdapter(runtime engineRuntime, server *memoryAPIServer) *Adapter {
 	return &Adapter{
-		runtime:   runtime,
-		server:    server,
-		closeDone: make(chan struct{}),
+		runtime: runtime,
+		server:  server,
+		events:  server.events,
 	}
 }
 
@@ -47,6 +56,18 @@ func (a *Adapter) Start(ctx context.Context) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
+	if a.closed {
+		return errors.New("playback engine closed")
+	}
+	if a.stopDone != nil {
+		select {
+		case <-a.stopDone:
+			a.stopDone = nil
+			a.stopErr = nil
+		default:
+			return errors.New("playback engine is stopping")
+		}
+	}
 	if a.cancel != nil {
 		return errors.New("playback engine already started")
 	}
@@ -54,50 +75,106 @@ func (a *Adapter) Start(ctx context.Context) error {
 	runCtx, cancel := context.WithCancel(ctx)
 	a.cancel = cancel
 	a.runDone = make(chan error, 1)
+	runtime := a.runtime
+	server := a.server
 	go func() {
-		err := a.runtime.Run(runCtx)
+		err := runtime.Run(runCtx)
 		if err != nil && !errors.Is(err, context.Canceled) {
-			a.server.emit(Event{Type: EventTypeError, Err: err})
+			server.emit(Event{Type: EventTypeError, Err: err})
 		}
 		a.runDone <- err
 	}()
 	return nil
 }
 
+func (a *Adapter) CancelLogin(ctx context.Context) error {
+	return a.stop(ctx, true, false, false)
+}
+
+func (a *Adapter) Logout(ctx context.Context) error {
+	return a.stop(ctx, true, true, false)
+}
+
 func (a *Adapter) Close(ctx context.Context) error {
+	return a.stop(ctx, false, false, true)
+}
+
+func (a *Adapter) stop(ctx context.Context, restart, clearState, final bool) error {
 	a.mu.Lock()
-	cancel := a.cancel
-	runDone := a.runDone
-	a.mu.Unlock()
-
-	if cancel == nil {
-		return errors.New("playback engine not started")
+	if a.stopDone != nil && final && !a.closed {
+		select {
+		case <-a.stopDone:
+			a.stopDone = nil
+			a.stopErr = nil
+		default:
+		}
 	}
-
-	a.closeOnce.Do(func() {
-		cancel()
+	if a.stopDone == nil {
+		done := make(chan struct{})
+		a.stopDone = done
+		cancel := a.cancel
+		runDone := a.runDone
+		runtime := a.runtime
+		server := a.server
+		if cancel != nil {
+			cancel()
+		}
 		go func() {
-			closeErr := a.runtime.Close()
-			runErr := <-runDone
+			closeErr := runtime.Close()
+			var runErr error
+			if runDone != nil {
+				runErr = <-runDone
+			}
 			if errors.Is(runErr, context.Canceled) {
 				runErr = nil
 			}
-			a.closeErr = errors.Join(closeErr, runErr, a.server.Close())
-			a.server.finish()
-			close(a.closeDone)
+			stopErr := errors.Join(closeErr, runErr, server.Close())
+			if clearState && a.clearState != nil {
+				stopErr = errors.Join(stopErr, a.clearState())
+			}
+
+			var nextRuntime engineRuntime
+			var nextServer *memoryAPIServer
+			if restart && a.factory != nil {
+				var err error
+				nextRuntime, nextServer, err = a.factory()
+				stopErr = errors.Join(stopErr, err)
+			}
+
+			a.mu.Lock()
+			a.cancel = nil
+			a.runDone = nil
+			a.stopErr = stopErr
+			if clearState {
+				a.hasSession = false
+			}
+			if final {
+				a.closed = true
+				a.eventsOnce.Do(func() { close(a.events) })
+			} else if nextRuntime != nil {
+				a.runtime = nextRuntime
+				a.server = nextServer
+			}
+			close(done)
+			a.mu.Unlock()
 		}()
-	})
+	}
+	done := a.stopDone
+	a.mu.Unlock()
 
 	select {
-	case <-a.closeDone:
-		return a.closeErr
+	case <-done:
+		a.mu.Lock()
+		err := a.stopErr
+		a.mu.Unlock()
+		return err
 	case <-ctx.Done():
 		return ctx.Err()
 	}
 }
 
 func (a *Adapter) Events() <-chan Event {
-	return a.server.events
+	return a.events
 }
 
 func (a *Adapter) Play(ctx context.Context, uri string) error {
@@ -197,6 +274,9 @@ func (a *Adapter) SetAutoplay(ctx context.Context, enabled bool) error {
 }
 
 func (a *Adapter) command(ctx context.Context, requestType daemon.ApiRequestType, data any) error {
-	_, err := a.server.request(ctx, requestType, data)
+	a.mu.Lock()
+	server := a.server
+	a.mu.Unlock()
+	_, err := server.request(ctx, requestType, data)
 	return err
 }

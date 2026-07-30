@@ -354,6 +354,93 @@ func TestAdapterReportsRuntimeCancellationFailure(t *testing.T) {
 	}
 }
 
+func TestAdapterCancelsLoginAndStartsFreshAttempt(t *testing.T) {
+	defer goleak.VerifyNone(t, goleak.IgnoreCurrent())
+
+	events := make(chan Event, 64)
+	var runtimes []*lifecycleRuntime
+	factory := func() (engineRuntime, *memoryAPIServer, error) {
+		runtime := newLifecycleRuntime()
+		runtimes = append(runtimes, runtime)
+		return runtime, newMemoryAPIServerWithEvents(events), nil
+	}
+	runtime, server, err := factory()
+	if err != nil {
+		t.Fatalf("create first attempt: %v", err)
+	}
+	adapter := newAdapter(runtime, server)
+	adapter.factory = factory
+
+	if err := adapter.Start(context.Background()); err != nil {
+		t.Fatalf("start first attempt: %v", err)
+	}
+	<-runtimes[0].started
+
+	if err := adapter.CancelLogin(context.Background()); err != nil {
+		t.Fatalf("cancel login: %v", err)
+	}
+	select {
+	case <-runtimes[0].closed:
+	default:
+		t.Fatal("first runtime was not closed")
+	}
+	select {
+	case _, ok := <-adapter.Events():
+		if !ok {
+			t.Fatal("cancel closed the stable events channel")
+		}
+	default:
+	}
+
+	if err := adapter.Start(context.Background()); err != nil {
+		t.Fatalf("start second attempt: %v", err)
+	}
+	if len(runtimes) != 2 {
+		t.Fatalf("runtime attempts: want 2, got %d", len(runtimes))
+	}
+	<-runtimes[1].started
+
+	if err := adapter.Close(context.Background()); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+}
+
+func TestAdapterLogoutClearsSessionBeforeFreshAttempt(t *testing.T) {
+	events := make(chan Event, 64)
+	factory := func() (engineRuntime, *memoryAPIServer, error) {
+		return newLifecycleRuntime(), newMemoryAPIServerWithEvents(events), nil
+	}
+	runtime, server, err := factory()
+	if err != nil {
+		t.Fatalf("create attempt: %v", err)
+	}
+	adapter := newAdapter(runtime, server)
+	adapter.factory = factory
+	adapter.hasSession = true
+	cleared := false
+	adapter.clearState = func() error {
+		cleared = true
+		return nil
+	}
+
+	if err := adapter.Logout(context.Background()); err != nil {
+		t.Fatalf("logout: %v", err)
+	}
+	if !cleared {
+		t.Fatal("logout did not clear persisted session")
+	}
+	if adapter.HasSession() {
+		t.Fatal("logout retained session state")
+	}
+
+	if err := adapter.Start(context.Background()); err != nil {
+		t.Fatalf("start after logout: %v", err)
+	}
+	if err := adapter.Close(context.Background()); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+}
+
 func TestAdapterPlaysTrackThroughInMemoryRequest(t *testing.T) {
 	defer goleak.VerifyNone(t, goleak.IgnoreCurrent())
 

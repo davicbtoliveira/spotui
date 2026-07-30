@@ -10,17 +10,20 @@ import (
 )
 
 type memoryAPIServer struct {
-	requests   chan daemon.ApiRequest
-	events     chan Event
-	closed     chan struct{}
-	once       sync.Once
-	eventsOnce sync.Once
+	requests chan daemon.ApiRequest
+	events   chan Event
+	closed   chan struct{}
+	once     sync.Once
 }
 
 func newMemoryAPIServer() *memoryAPIServer {
+	return newMemoryAPIServerWithEvents(make(chan Event, 64))
+}
+
+func newMemoryAPIServerWithEvents(events chan Event) *memoryAPIServer {
 	return &memoryAPIServer{
 		requests: make(chan daemon.ApiRequest),
-		events:   make(chan Event, 64),
+		events:   events,
 		closed:   make(chan struct{}),
 	}
 }
@@ -99,10 +102,6 @@ func (s *memoryAPIServer) Receive() <-chan daemon.ApiRequest {
 func (s *memoryAPIServer) Close() error {
 	s.once.Do(func() { close(s.closed) })
 	return nil
-}
-
-func (s *memoryAPIServer) finish() {
-	s.eventsOnce.Do(func() { close(s.events) })
 }
 
 func (s *memoryAPIServer) emit(event Event) {

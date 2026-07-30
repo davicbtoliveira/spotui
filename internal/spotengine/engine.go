@@ -5,6 +5,8 @@ import "context"
 type Engine interface {
 	HasSession() bool
 	Start(context.Context) error
+	CancelLogin(context.Context) error
+	Logout(context.Context) error
 	SearchTracks(context.Context, SearchRequest) (SearchPage, error)
 	Play(context.Context, string) error
 	Pause(context.Context) error
