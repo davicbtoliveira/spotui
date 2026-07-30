@@ -1,11 +1,29 @@
 package msgs
 
-import "github.com/dcbto/spotui/internal/spotengine"
+import (
+	"github.com/dcbto/spotui/internal/spotengine"
+	"image"
+)
 
 type EngineTrackSearchLoadedMsg struct {
 	Tracks []spotengine.Track
 	Total  int
 	Offset int
+}
+
+type CatalogLoadedMsg struct {
+	Route     string
+	RequestID uint64
+	Data      any
+	Err       error
+}
+
+type ShuffleChangedMsg struct{ Enabled bool }
+
+type ArtworkLoadedMsg struct {
+	URL   string
+	Image image.Image
+	Err   error
 }
 
 type ErrMsg struct {

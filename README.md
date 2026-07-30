@@ -54,17 +54,22 @@ SpotUI does not resume the previously playing track after startup or reconnect.
 
 | Key | Action |
 |-----|--------|
-| `/` | Search tracks |
-| `[` / `]` | Previous / next search page |
+| `/` | Open grouped Search (tracks, albums, artists, playlists) |
+| `[` / `]` | Previous / next catalog page |
 | `esc` | Cancel search input |
 | `j` / `↓` | Move cursor down |
 | `k` / `↑` | Move cursor up |
-| `enter` | Play selected track |
+| `enter` | Play a track or open its album/artist/playlist |
 | `space` | Play / pause |
 | `n` | Next track |
 | `p` | Previous track |
 | `-` / `+` | Lower / raise volume |
 | `a` | Toggle Autoplay |
+| `s` | Shuffle the current album or playlist |
+| `h` / `l` | Seek backward / forward 10 seconds |
+| `tab` | Switch navigation/content focus |
+| `esc` / `backspace` | Back from details |
+| `o` | Open the selected Spotify link |
 | `L` | Log out |
 | `?` | Toggle help |
 | `q` / `ctrl+c` | Quit |

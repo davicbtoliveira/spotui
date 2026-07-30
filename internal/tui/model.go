@@ -2,6 +2,7 @@ package tui
 
 import (
 	"errors"
+	"image"
 	"math/rand/v2"
 	"net/url"
 	"strings"
@@ -49,6 +50,7 @@ type RootModel struct {
 	engineActive      bool
 	engineVolume      int
 	engineAutoplay    bool
+	engineShuffle     bool
 	engineTransferred bool
 
 	statusMsg        string
@@ -67,6 +69,29 @@ type RootModel struct {
 	searchCompleted   bool
 	searchOffset      int
 	searchTotal       int
+
+	browseInitialized   bool
+	activeSection       int
+	navCursor           int
+	browseFocus         int
+	browseRoute         string
+	browseTitle         string
+	browseItems         []browseItem
+	browseCursor        int
+	browseLoading       bool
+	browseError         string
+	browseOffset        int
+	browseTotal         int
+	browseContextURI    string
+	browseContextKind   string
+	browseStack         []browseSnapshot
+	browseRequestID     uint64
+	browseMeta          string
+	browseCache         map[string]CatalogLoadedMsg
+	artwork             map[string]image.Image
+	artworkLoading      map[string]bool
+	groupedSearchActive bool
+	groupedSearch       spotengine.SearchGroups
 }
 
 func NewRootModel(engine spotengine.Engine, openURL func(string) error) RootModel {
@@ -93,6 +118,12 @@ func NewRootModelWithRecovery(
 		library:         library.New(),
 		engineVolume:    100,
 		engineAutoplay:  engine.AutoplayEnabled(),
+		activeSection:   sectionLibrary,
+		navCursor:       sectionLibrary,
+		browseFocus:     1,
+		browseCache:     make(map[string]CatalogLoadedMsg),
+		artwork:         make(map[string]image.Image),
+		artworkLoading:  make(map[string]bool),
 		waitForRecovery: waitForRecovery,
 		recoveryJitter:  recoveryJitter,
 	}
@@ -179,6 +210,13 @@ func (m RootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.recoveryAttempt = 0
 				m.statusMsg = ""
 				m.statusIsErr = false
+				if !m.browseInitialized {
+					m.browseInitialized = true
+					m.browseRoute = "liked"
+					m.browseTitle = "Liked Tracks"
+					return m, tea.Batch(m.waitEngineEvent(), m.loadBrowseRoute())
+				}
+				return m, m.waitEngineEvent()
 			}
 		case spotengine.EventTypeMetadata:
 			if msg.Event.Track != nil {
@@ -191,6 +229,8 @@ func (m RootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.localProgressMs = msg.Event.PositionMS
 		case spotengine.EventTypeSeek:
 			m.localProgressMs = msg.Event.PositionMS
+		case spotengine.EventTypeShuffle:
+			m.engineShuffle = msg.Event.Shuffle
 		case spotengine.EventTypeBuffering:
 			m.engineBuffering = true
 			m.enginePlaying = false
@@ -337,6 +377,29 @@ func (m RootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.searchTotal = msg.Total
 		return m, nil
 
+	case CatalogLoadedMsg:
+		return m, m.applyCatalogMessage(msg)
+
+	case ArtworkLoadedMsg:
+		delete(m.artworkLoading, msg.URL)
+		if msg.Err == nil && msg.Image != nil {
+			if m.artwork == nil {
+				m.artwork = make(map[string]image.Image)
+			}
+			m.artwork[msg.URL] = msg.Image
+		}
+		return m, nil
+
+	case ShuffleChangedMsg:
+		m.engineShuffle = msg.Enabled
+		if msg.Enabled {
+			m.statusMsg = "Shuffle enabled"
+		} else {
+			m.statusMsg = "Shuffle disabled"
+		}
+		m.statusIsErr = false
+		return m, commands.CmdClearStatus()
+
 	case ProgressTickMsg:
 		if m.engineTrack != nil && m.enginePlaying {
 			m.localProgressMs += 1000
@@ -389,12 +452,33 @@ func (m *RootModel) clearAccount() {
 	m.engineTransferred = false
 	m.engineVolume = 100
 	m.engineAutoplay = m.engine.AutoplayEnabled()
+	m.engineShuffle = false
 	m.searchInputActive = false
 	m.searchQuery = ""
 	m.searchLoading = false
 	m.searchCompleted = false
 	m.searchOffset = 0
 	m.searchTotal = 0
+	m.browseInitialized = false
+	m.activeSection = sectionLibrary
+	m.navCursor = sectionLibrary
+	m.browseFocus = 1
+	m.browseRoute = ""
+	m.browseTitle = ""
+	m.browseItems = nil
+	m.browseCursor = 0
+	m.browseLoading = false
+	m.browseError = ""
+	m.browseOffset = 0
+	m.browseTotal = 0
+	m.browseContextURI = ""
+	m.browseContextKind = ""
+	m.browseStack = nil
+	m.browseCache = make(map[string]CatalogLoadedMsg)
+	m.artwork = make(map[string]image.Image)
+	m.artworkLoading = make(map[string]bool)
+	m.groupedSearchActive = false
+	m.groupedSearch = spotengine.SearchGroups{}
 }
 
 func (m *RootModel) waitEngineEvent() tea.Cmd {
@@ -510,6 +594,19 @@ func (m RootModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.state == stateReady && msg.String() == KeyLogout {
 		m.confirmingLogout = true
 		return m, nil
+	}
+	if m.state == stateReady {
+		switch msg.String() {
+		case KeyQuitAlt:
+			return m, tea.Quit
+		case KeyHelp:
+			m.showHelp = true
+			return m, nil
+		}
+	}
+
+	if m.state == stateReady && m.browseInitialized {
+		return m.handleBrowseKey(msg)
 	}
 
 	if m.state == stateReady && m.searchInputActive {
@@ -663,7 +760,7 @@ func (m RootModel) View() string {
 		return ""
 	}
 
-	if m.width < 40 {
+	if m.width < 50 || m.height < 16 {
 		return lipgloss.Place(m.width, m.height,
 			lipgloss.Center, lipgloss.Center,
 			theme.ErrorStyle.Render("Terminal too small"))
@@ -744,6 +841,9 @@ func (m RootModel) View() string {
 func (m RootModel) renderMain() string {
 	if m.showHelp {
 		return views.RenderHelpOverlay(m.width, m.height)
+	}
+	if m.browseInitialized {
+		return m.renderBrowseShell()
 	}
 
 	topBar := views.RenderTopBar(m.width)

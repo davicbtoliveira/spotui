@@ -57,14 +57,21 @@ func (s *memoryAPIServer) Emit(event *daemon.ApiEvent) {
 		translated.Type = EventTypeInactive
 	case daemon.ApiEventTypeMetadata:
 		data := event.Data.(daemon.ApiEventDataMetadata)
+		imageURL := ""
+		if data.AlbumCoverUrl != nil {
+			imageURL = *data.AlbumCoverUrl
+		}
 		translated = Event{
 			Type: EventTypeMetadata,
 			Track: &Track{
-				URI:        data.Uri,
-				Name:       data.Name,
-				Artist:     strings.Join(data.ArtistNames, ", "),
-				Album:      data.AlbumName,
-				DurationMS: data.Duration,
+				URI:         data.Uri,
+				Name:        data.Name,
+				Artist:      strings.Join(data.ArtistNames, ", "),
+				Album:       data.AlbumName,
+				DurationMS:  data.Duration,
+				ImageURL:    imageURL,
+				TrackNumber: data.TrackNumber,
+				DiscNumber:  data.DiscNumber,
 			},
 			PositionMS: int(data.Position),
 			DurationMS: data.Duration,
@@ -85,6 +92,9 @@ func (s *memoryAPIServer) Emit(event *daemon.ApiEvent) {
 			PositionMS: data.Position,
 			DurationMS: data.Duration,
 		}
+	case daemon.ApiEventTypeShuffleContext:
+		data := event.Data.(daemon.ApiEventDataShuffleContext)
+		translated = Event{Type: EventTypeShuffle, Shuffle: data.Value}
 	case daemon.ApiEventTypeAccountProduct:
 		data := event.Data.(daemon.ApiEventDataAccountProduct)
 		translated = Event{

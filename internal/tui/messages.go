@@ -25,3 +25,6 @@ type EngineReconnectErrMsg = msgs.EngineReconnectErrMsg
 type ReconnectTimerMsg = msgs.ReconnectTimerMsg
 type SessionExpiredMsg = msgs.SessionExpiredMsg
 type SessionExpireErrMsg = msgs.SessionExpireErrMsg
+type CatalogLoadedMsg = msgs.CatalogLoadedMsg
+type ShuffleChangedMsg = msgs.ShuffleChangedMsg
+type ArtworkLoadedMsg = msgs.ArtworkLoadedMsg

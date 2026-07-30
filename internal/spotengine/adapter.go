@@ -22,15 +22,16 @@ type engineRuntime interface {
 type attemptFactory func() (engineRuntime, *memoryAPIServer, error)
 
 type Adapter struct {
-	runtime          engineRuntime
-	server           *memoryAPIServer
-	factory          attemptFactory
-	clearState       func() error
-	saveAutoplay     func(bool) error
-	sessionAvailable func() bool
-	events           chan Event
-	hasSession       bool
-	autoplay         bool
+	runtime               engineRuntime
+	server                *memoryAPIServer
+	factory               attemptFactory
+	clearState            func() error
+	saveAutoplay          func(bool) error
+	sessionAvailable      func() bool
+	events                chan Event
+	hasSession            bool
+	autoplay              bool
+	playlistContextLoader PlaylistContextLoader
 
 	mu         sync.Mutex
 	cancel     context.CancelFunc
