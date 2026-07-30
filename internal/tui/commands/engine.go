@@ -60,6 +60,24 @@ func CmdLogout(engine spotengine.Engine) tea.Cmd {
 	}
 }
 
+func CmdReconnectEngine(engine spotengine.Engine) tea.Cmd {
+	return func() tea.Msg {
+		if err := engine.Reconnect(context.Background()); err != nil {
+			return msgs.EngineReconnectErrMsg{Err: err}
+		}
+		return msgs.EngineReconnectedMsg{}
+	}
+}
+
+func CmdExpireSession(engine spotengine.Engine) tea.Cmd {
+	return func() tea.Msg {
+		if err := engine.Logout(context.Background()); err != nil {
+			return msgs.SessionExpireErrMsg{Err: err}
+		}
+		return msgs.SessionExpiredMsg{}
+	}
+}
+
 func CmdPlayEngineTrack(engine spotengine.Engine, uri string) tea.Cmd {
 	return func() tea.Msg {
 		if err := engine.Play(context.Background(), uri); err != nil {

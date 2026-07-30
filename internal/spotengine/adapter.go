@@ -10,7 +10,11 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/devgianlu/go-librespot/ap"
 	"github.com/devgianlu/go-librespot/daemon"
+	"github.com/devgianlu/go-librespot/login5"
+	spotifypb "github.com/devgianlu/go-librespot/proto/spotify"
+	login5pb "github.com/devgianlu/go-librespot/proto/spotify/login5/v3"
 )
 
 type engineRuntime interface {
@@ -21,14 +25,15 @@ type engineRuntime interface {
 type attemptFactory func() (engineRuntime, *memoryAPIServer, error)
 
 type Adapter struct {
-	runtime      engineRuntime
-	server       *memoryAPIServer
-	factory      attemptFactory
-	clearState   func() error
-	saveAutoplay func(bool) error
-	events       chan Event
-	hasSession   bool
-	autoplay     bool
+	runtime          engineRuntime
+	server           *memoryAPIServer
+	factory          attemptFactory
+	clearState       func() error
+	saveAutoplay     func(bool) error
+	sessionAvailable func() bool
+	events           chan Event
+	hasSession       bool
+	autoplay         bool
 
 	mu         sync.Mutex
 	cancel     context.CancelFunc
@@ -41,9 +46,13 @@ type Adapter struct {
 
 func (a *Adapter) HasSession() bool {
 	a.mu.Lock()
-	defer a.mu.Unlock()
-
-	return a.hasSession
+	available := a.sessionAvailable
+	hasSession := a.hasSession
+	a.mu.Unlock()
+	if available != nil {
+		return available()
+	}
+	return hasSession
 }
 
 func (a *Adapter) AutoplayEnabled() bool {
@@ -101,14 +110,38 @@ func (a *Adapter) Start(ctx context.Context) error {
 	go func() {
 		err := runtime.Run(runCtx)
 		if err != nil && !errors.Is(err, context.Canceled) {
-			server.emit(Event{Type: EventTypeError, Err: err})
+			server.emit(Event{
+				Type:      EventTypeError,
+				Err:       err,
+				ErrorKind: classifyRuntimeError(err),
+			})
 		}
 		runDone <- err
 	}()
 	return nil
 }
 
+func classifyRuntimeError(err error) ErrorKind {
+	var accesspointErr *ap.AccesspointLoginError
+	if errors.As(err, &accesspointErr) && accesspointErr.Message != nil &&
+		accesspointErr.Message.GetErrorCode() == spotifypb.ErrorCode_BadCredentials {
+		return ErrorKindCredentialRejected
+	}
+
+	var loginErr *login5.LoginError
+	if errors.As(err, &loginErr) &&
+		(loginErr.Code == login5pb.LoginError_INVALID_CREDENTIALS ||
+			loginErr.Code == login5pb.LoginError_UNKNOWN_IDENTIFIER) {
+		return ErrorKindCredentialRejected
+	}
+	return ErrorKindTransient
+}
+
 func (a *Adapter) CancelLogin(ctx context.Context) error {
+	return a.stop(ctx, true, false, false)
+}
+
+func (a *Adapter) Reconnect(ctx context.Context) error {
 	return a.stop(ctx, true, false, false)
 }
 

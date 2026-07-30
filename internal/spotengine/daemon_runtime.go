@@ -89,6 +89,10 @@ func newAdapterAtDir(configDir string) (*Adapter, error) {
 	adapter.factory = factory
 	adapter.clearState = store.Clear
 	adapter.saveAutoplay = preferences.SaveAutoplay
+	adapter.sessionAvailable = func() bool {
+		state, err := store.Load()
+		return err == nil && state != nil && len(state.Credentials.Data) > 0
+	}
 	adapter.hasSession = hasSession
 	adapter.autoplay = autoplay
 	return adapter, nil

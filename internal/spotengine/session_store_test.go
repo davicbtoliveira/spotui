@@ -202,3 +202,27 @@ func TestAdapterClosePreservesReusableLocalSession(t *testing.T) {
 		t.Fatal("close removed reusable Local Session")
 	}
 }
+
+func TestAdapterDetectsSessionPersistedAfterConstruction(t *testing.T) {
+	configDir := t.TempDir()
+	adapter, err := newAdapterAtDir(configDir)
+	if err != nil {
+		t.Fatalf("new adapter: %v", err)
+	}
+	if adapter.HasSession() {
+		t.Fatal("new adapter unexpectedly has session")
+	}
+
+	state := &librespot.AppState{DeviceId: "device-id"}
+	state.Credentials.Username = "listener"
+	state.Credentials.Data = []byte("credential")
+	if err := newFileStateStore(filepath.Join(configDir, "session.json")).Save(state); err != nil {
+		t.Fatalf("persist session: %v", err)
+	}
+	if !adapter.HasSession() {
+		t.Fatal("adapter did not observe newly persisted session")
+	}
+	if err := adapter.Close(context.Background()); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+}

@@ -6,6 +6,7 @@ type Engine interface {
 	HasSession() bool
 	AutoplayEnabled() bool
 	Start(context.Context) error
+	Reconnect(context.Context) error
 	CancelLogin(context.Context) error
 	Logout(context.Context) error
 	SearchTracks(context.Context, SearchRequest) (SearchPage, error)

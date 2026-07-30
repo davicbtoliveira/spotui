@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/dcbto/spotui/internal/library"
@@ -14,6 +15,15 @@ import (
 	"github.com/dcbto/spotui/internal/spotifyapi"
 	"github.com/zmb3/spotify/v2"
 )
+
+type recoveryClock struct {
+	delays []time.Duration
+}
+
+func (c *recoveryClock) Wait(delay time.Duration) tea.Cmd {
+	c.delays = append(c.delays, delay)
+	return func() tea.Msg { return ReconnectTimerMsg{} }
+}
 
 type modelBrowser struct {
 	urls []string
@@ -707,6 +717,148 @@ func TestLogoutLifecycleKeysRemainAvailableFromSearchInput(t *testing.T) {
 	}
 	if _, ok := quitCmd().(tea.QuitMsg); !ok {
 		t.Fatalf("q command: want QuitMsg, got %T", quitCmd())
+	}
+}
+
+func TestTransientEngineFailureReconnectsWithoutBrowserLogin(t *testing.T) {
+	engine := spotengine.NewFake()
+	engine.SetHasSession(true)
+	browser := &modelBrowser{}
+	clock := &recoveryClock{}
+	m := NewRootModelWithRecovery(engine, browser.Open, clock.Wait, func() float64 { return 0.5 })
+	m.state = stateReady
+	m.width = 80
+	m.height = 24
+	m.engineTrack = &spotengine.Track{Name: "Hello", DurationMS: 100000}
+	m.enginePlaying = true
+
+	updated, reconnectCmd := m.Update(msgs.EngineEventMsg{
+		Event: spotengine.Event{Type: spotengine.EventTypeError, Err: errors.New("network unavailable")},
+	})
+	m = updated.(RootModel)
+	if m.state != stateReconnecting || reconnectCmd == nil {
+		t.Fatalf("transient failure: state=%v cmd=%v", m.state, reconnectCmd)
+	}
+	if view := m.View(); !strings.Contains(view, "Reconnecting") {
+		t.Fatalf("reconnecting state not visible:\n%s", view)
+	}
+
+	updated, waitCmd := m.Update(reconnectCmd())
+	m = updated.(RootModel)
+	if waitCmd == nil || len(clock.delays) != 1 || clock.delays[0] != time.Second {
+		t.Fatalf("first retry delays: %v", clock.delays)
+	}
+	updated, startCmd := m.Update(waitCmd())
+	m = updated.(RootModel)
+	if startCmd == nil {
+		t.Fatal("retry timer returned no engine start")
+	}
+	if _, ok := startCmd().(msgs.EngineStartedMsg); !ok {
+		t.Fatal("retry did not start engine")
+	}
+
+	calls := engine.Calls()
+	want := []spotengine.Operation{spotengine.OperationReconnect, spotengine.OperationStart}
+	if len(calls) != len(want) {
+		t.Fatalf("engine calls: %#v", calls)
+	}
+	for i, operation := range want {
+		if calls[i].Operation != operation {
+			t.Fatalf("call %d: want %q, got %#v", i, operation, calls[i])
+		}
+	}
+	if len(browser.urls) != 0 {
+		t.Fatalf("reconnect opened browser: %v", browser.urls)
+	}
+
+	updated, _ = m.Update(msgs.EngineEventMsg{Event: spotengine.Event{Type: spotengine.EventTypeReady}})
+	m = updated.(RootModel)
+	if m.state != stateReady || m.engineTrack != nil || m.enginePlaying {
+		t.Fatalf("recovery resumed playback: state=%v track=%#v playing=%v", m.state, m.engineTrack, m.enginePlaying)
+	}
+}
+
+func TestReconnectBackoffIsExponentialJitteredAndCapped(t *testing.T) {
+	want := []time.Duration{
+		time.Second,
+		2 * time.Second,
+		4 * time.Second,
+		8 * time.Second,
+		16 * time.Second,
+		30 * time.Second,
+		30 * time.Second,
+	}
+	for attempt, expected := range want {
+		if got := reconnectDelay(attempt, 0.5); got != expected {
+			t.Fatalf("attempt %d: want %s, got %s", attempt, expected, got)
+		}
+	}
+	if got := reconnectDelay(0, 0); got != 800*time.Millisecond {
+		t.Fatalf("minimum first jitter: want 800ms, got %s", got)
+	}
+	if got := reconnectDelay(0, 1); got != 1200*time.Millisecond {
+		t.Fatalf("maximum first jitter: want 1.2s, got %s", got)
+	}
+	if got := reconnectDelay(20, 1); got != 30*time.Second {
+		t.Fatalf("cap: want 30s, got %s", got)
+	}
+}
+
+func TestQuitRemainsAvailableWhileReconnecting(t *testing.T) {
+	m := NewRootModel(spotengine.NewFake(), func(string) error { return nil })
+	m.state = stateReconnecting
+
+	_, quitCmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("q")})
+	if quitCmd == nil {
+		t.Fatal("q returned no Quit command")
+	}
+	if _, ok := quitCmd().(tea.QuitMsg); !ok {
+		t.Fatalf("q command: want QuitMsg, got %T", quitCmd())
+	}
+}
+
+func TestRejectedCredentialsExpireSessionWithoutReconnect(t *testing.T) {
+	engine := spotengine.NewFake()
+	engine.SetHasSession(true)
+	browser := &modelBrowser{}
+	m := NewRootModel(engine, browser.Open)
+	m.state = stateLoading
+	m.width = 80
+	m.height = 24
+	m.engineTrack = &spotengine.Track{Name: "Hello", DurationMS: 100000}
+
+	updated, expireCmd := m.Update(msgs.EngineEventMsg{
+		Event: spotengine.Event{
+			Type:      spotengine.EventTypeError,
+			Err:       errors.New("bad credentials"),
+			ErrorKind: spotengine.ErrorKindCredentialRejected,
+		},
+	})
+	m = updated.(RootModel)
+	if expireCmd == nil {
+		t.Fatal("credential rejection returned no session cleanup")
+	}
+	updated, _ = m.Update(expireCmd())
+	m = updated.(RootModel)
+
+	if m.state != stateLoggedOut || engine.HasSession() {
+		t.Fatalf("expired session: state=%v hasSession=%v", m.state, engine.HasSession())
+	}
+	if m.engineTrack != nil || m.enginePlaying {
+		t.Fatalf("expired session retained player: track=%#v playing=%v", m.engineTrack, m.enginePlaying)
+	}
+	view := m.View()
+	for _, want := range []string{"Session expired", "Log in with Spotify"} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("expired view missing %q:\n%s", want, view)
+		}
+	}
+	calls := engine.Calls()
+	if len(calls) != 1 || calls[0].Operation != spotengine.OperationLogout {
+		t.Fatalf("engine calls: %#v", calls)
+	}
+	if len(browser.urls) != 0 {
+		t.Fatalf("expired session opened browser: %v", browser.urls)
 	}
 }
 

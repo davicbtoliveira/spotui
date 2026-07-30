@@ -7,9 +7,30 @@ import (
 	"testing"
 	"time"
 
+	"github.com/devgianlu/go-librespot/ap"
 	"github.com/devgianlu/go-librespot/daemon"
+	spotifypb "github.com/devgianlu/go-librespot/proto/spotify"
 	"go.uber.org/goleak"
 )
+
+func TestAdapterClassifiesRejectedStoredCredentials(t *testing.T) {
+	code := spotifypb.ErrorCode_BadCredentials
+	rejected := &ap.AccesspointLoginError{
+		Message: &spotifypb.APLoginFailed{ErrorCode: &code},
+	}
+	adapter := newAdapter(failingRuntime{err: rejected}, newMemoryAPIServer())
+
+	if err := adapter.Start(context.Background()); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	event := <-adapter.Events()
+	if event.Type != EventTypeError || event.ErrorKind != ErrorKindCredentialRejected {
+		t.Fatalf("event: %#v", event)
+	}
+	if err := adapter.Close(context.Background()); !errors.Is(err, rejected) {
+		t.Fatalf("close: want rejected credentials, got %v", err)
+	}
+}
 
 type lifecycleRuntime struct {
 	started chan struct{}
@@ -406,6 +427,47 @@ func TestAdapterCancelsLoginAndStartsFreshAttempt(t *testing.T) {
 	}
 	<-runtimes[1].started
 
+	if err := adapter.Close(context.Background()); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+}
+
+func TestAdapterReconnectReleasesAttemptBeforeFreshStart(t *testing.T) {
+	defer goleak.VerifyNone(t, goleak.IgnoreCurrent())
+
+	events := make(chan Event, 64)
+	var runtimes []*lifecycleRuntime
+	factory := func() (engineRuntime, *memoryAPIServer, error) {
+		runtime := newLifecycleRuntime()
+		runtimes = append(runtimes, runtime)
+		return runtime, newMemoryAPIServerWithEvents(events), nil
+	}
+	runtime, server, err := factory()
+	if err != nil {
+		t.Fatalf("create first attempt: %v", err)
+	}
+	adapter := newAdapter(runtime, server)
+	adapter.factory = factory
+
+	if err := adapter.Start(context.Background()); err != nil {
+		t.Fatalf("start first attempt: %v", err)
+	}
+	<-runtimes[0].started
+	if err := adapter.Reconnect(context.Background()); err != nil {
+		t.Fatalf("reconnect: %v", err)
+	}
+	select {
+	case <-runtimes[0].closed:
+	default:
+		t.Fatal("reconnect retained previous runtime")
+	}
+
+	if err := adapter.Start(context.Background()); err != nil {
+		t.Fatalf("start fresh attempt: %v", err)
+	}
+	if len(runtimes) != 2 {
+		t.Fatalf("runtime attempts: want 2, got %d", len(runtimes))
+	}
 	if err := adapter.Close(context.Background()); err != nil {
 		t.Fatalf("close: %v", err)
 	}

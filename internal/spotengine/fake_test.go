@@ -41,6 +41,9 @@ func TestFakeSupportsStableEngineContract(t *testing.T) {
 	if err := engine.Start(ctx); err != nil {
 		t.Fatalf("start: %v", err)
 	}
+	if err := engine.Reconnect(ctx); err != nil {
+		t.Fatalf("reconnect: %v", err)
+	}
 	if err := engine.CancelLogin(ctx); err != nil {
 		t.Fatalf("cancel login: %v", err)
 	}
@@ -79,6 +82,7 @@ func TestFakeSupportsStableEngineContract(t *testing.T) {
 
 	want := []spotengine.Operation{
 		spotengine.OperationStart,
+		spotengine.OperationReconnect,
 		spotengine.OperationCancelLogin,
 		spotengine.OperationLogout,
 		spotengine.OperationSearchTracks,
@@ -99,7 +103,7 @@ func TestFakeSupportsStableEngineContract(t *testing.T) {
 			t.Fatalf("call %d: want %q, got %q", i, operation, calls[i].Operation)
 		}
 	}
-	if calls[3].Search.Query != "hello" || calls[8].Volume != 65 || calls[9].Enabled {
+	if calls[4].Search.Query != "hello" || calls[9].Volume != 65 || calls[10].Enabled {
 		t.Fatalf("recorded arguments: %#v", calls)
 	}
 

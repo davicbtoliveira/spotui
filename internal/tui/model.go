@@ -1,7 +1,9 @@
 package tui
 
 import (
+	"math/rand/v2"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -22,6 +24,7 @@ const (
 	stateAuthenticating
 	stateCancelling
 	stateLoading
+	stateReconnecting
 	stateUnsupported
 	stateReady
 )
@@ -61,6 +64,10 @@ type RootModel struct {
 	confirmingLogout bool
 	loggingOut       bool
 
+	waitForRecovery func(time.Duration) tea.Cmd
+	recoveryJitter  func() float64
+	recoveryAttempt int
+
 	searchInputActive bool
 	searchQuery       string
 	searchLoading     bool
@@ -80,13 +87,31 @@ const (
 )
 
 func NewRootModel(engine spotengine.Engine, openURL func(string) error) RootModel {
+	return NewRootModelWithRecovery(
+		engine,
+		openURL,
+		func(delay time.Duration) tea.Cmd {
+			return tea.Tick(delay, func(time.Time) tea.Msg { return ReconnectTimerMsg{} })
+		},
+		rand.Float64,
+	)
+}
+
+func NewRootModelWithRecovery(
+	engine spotengine.Engine,
+	openURL func(string) error,
+	waitForRecovery func(time.Duration) tea.Cmd,
+	recoveryJitter func() float64,
+) RootModel {
 	model := RootModel{
-		state:          stateLoggedOut,
-		engine:         engine,
-		openURL:        openURL,
-		library:        library.New(),
-		engineVolume:   100,
-		engineAutoplay: engine.AutoplayEnabled(),
+		state:           stateLoggedOut,
+		engine:          engine,
+		openURL:         openURL,
+		library:         library.New(),
+		engineVolume:    100,
+		engineAutoplay:  engine.AutoplayEnabled(),
+		waitForRecovery: waitForRecovery,
+		recoveryJitter:  recoveryJitter,
 	}
 	if engine.HasSession() {
 		model.state = stateLoading
@@ -133,6 +158,11 @@ func (m RootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.waitEngineEvent()
 
 	case EngineStartErrMsg:
+		if m.state == stateReconnecting {
+			m.statusMsg = "Reconnect failed: " + msg.Err.Error()
+			m.statusIsErr = true
+			return m, m.scheduleReconnect()
+		}
 		m.state = stateLoggedOut
 		m.statusMsg = "Login failed: " + msg.Err.Error()
 		m.statusIsErr = true
@@ -150,12 +180,24 @@ func (m RootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.statusIsErr = false
 			return m, commands.CmdOpenURL(m.openURL, msg.Event.URL)
 		case spotengine.EventTypeError:
+			if msg.Event.ErrorKind == spotengine.ErrorKindCredentialRejected &&
+				(m.state == stateLoading || m.state == stateReady || m.state == stateReconnecting) &&
+				m.engine.HasSession() {
+				m.state = stateLoading
+				m.statusMsg = "Session expired. Removing invalid Local Session..."
+				m.statusIsErr = true
+				return m, commands.CmdExpireSession(m.engine)
+			}
 			if m.state == stateAuthenticating || m.state == stateLoading {
 				clearSession := m.state == stateLoading && m.engine.HasSession()
 				m.state = stateCancelling
 				m.statusMsg = "Login failed: " + msg.Event.Err.Error()
 				m.statusIsErr = true
 				return m, commands.CmdResetLogin(m.engine, clearSession)
+			}
+			if (m.state == stateReady || m.state == stateReconnecting) && m.engine.HasSession() {
+				m.enterReconnecting(msg.Event.Err)
+				return m, commands.CmdReconnectEngine(m.engine)
 			}
 			m.statusMsg = "Playback engine: " + msg.Event.Err.Error()
 			m.statusIsErr = true
@@ -165,9 +207,12 @@ func (m RootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 		case spotengine.EventTypeReady:
-			if m.state == stateAuthenticating || m.state == stateLoading {
+			if m.state == stateAuthenticating || m.state == stateLoading || m.state == stateReconnecting {
 				m.state = stateReady
 				m.library.SetActiveTab(library.TabSearch)
+				m.recoveryAttempt = 0
+				m.statusMsg = ""
+				m.statusIsErr = false
 			}
 		case spotengine.EventTypeMetadata:
 			if msg.Event.Track != nil {
@@ -236,6 +281,30 @@ func (m RootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.statusMsg = "Login failed: playback engine closed"
 			m.statusIsErr = true
 		}
+		return m, nil
+
+	case EngineReconnectedMsg:
+		return m, m.scheduleReconnect()
+
+	case EngineReconnectErrMsg:
+		m.statusMsg = "Reconnect cleanup: " + msg.Err.Error()
+		m.statusIsErr = true
+		return m, m.scheduleReconnect()
+
+	case ReconnectTimerMsg:
+		return m, commands.CmdStartEngine(m.engine)
+
+	case SessionExpiredMsg:
+		m.clearAccount()
+		m.state = stateLoggedOut
+		m.statusMsg = "Session expired. Log in with Spotify again."
+		m.statusIsErr = true
+		return m, nil
+
+	case SessionExpireErrMsg:
+		m.state = stateLoading
+		m.statusMsg = "Session expired, but cleanup failed: " + msg.Err.Error()
+		m.statusIsErr = true
 		return m, nil
 
 	case LoginResetMsg:
@@ -437,6 +506,39 @@ func (m *RootModel) waitEngineEvent() tea.Cmd {
 	return commands.CmdWaitEngineEvent(m.engine)
 }
 
+func (m *RootModel) enterReconnecting(err error) {
+	m.state = stateReconnecting
+	m.statusMsg = "Connection lost: " + err.Error()
+	m.statusIsErr = true
+	m.engineTrack = nil
+	m.enginePlaying = false
+	m.engineBuffering = false
+	m.engineActive = false
+	m.engineTransferred = false
+	m.localProgressMs = 0
+}
+
+func (m *RootModel) scheduleReconnect() tea.Cmd {
+	delay := reconnectDelay(m.recoveryAttempt, m.recoveryJitter())
+	m.recoveryAttempt++
+	return m.waitForRecovery(delay)
+}
+
+func reconnectDelay(attempt int, jitter float64) time.Duration {
+	base := time.Second
+	for i := 0; i < attempt && base < 30*time.Second; i++ {
+		base *= 2
+	}
+	if base > 30*time.Second {
+		base = 30 * time.Second
+	}
+	delay := time.Duration(float64(base) * (0.8 + 0.4*jitter))
+	if delay > 30*time.Second {
+		return 30 * time.Second
+	}
+	return delay
+}
+
 func (m RootModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.showHelp {
 		m.showHelp = false
@@ -493,6 +595,13 @@ func (m RootModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 
 	if m.state == stateCancelling {
+		if msg.String() == KeyQuitAlt {
+			return m, tea.Quit
+		}
+		return m, nil
+	}
+
+	if m.state == stateReconnecting {
 		if msg.String() == KeyQuitAlt {
 			return m, tea.Quit
 		}
@@ -748,6 +857,14 @@ func (m RootModel) View() string {
 		}
 		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center,
 			lipgloss.JoinVertical(lipgloss.Center, rows...))
+	case stateReconnecting:
+		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center,
+			lipgloss.JoinVertical(lipgloss.Center,
+				theme.TopBarTitle.Render("Reconnecting..."),
+				theme.SubtextStyle.Render("Playback controls and Track Search are temporarily disabled."),
+				theme.ErrorStyle.Render(m.statusMsg),
+				theme.SubtextStyle.Render("Press q to quit"),
+			))
 	case stateUnsupported:
 		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center,
 			lipgloss.JoinVertical(lipgloss.Center,

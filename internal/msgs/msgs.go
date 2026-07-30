@@ -91,3 +91,17 @@ type LogoutDoneMsg struct{}
 type LogoutErrMsg struct {
 	Err error
 }
+
+type EngineReconnectedMsg struct{}
+
+type EngineReconnectErrMsg struct {
+	Err error
+}
+
+type ReconnectTimerMsg struct{}
+
+type SessionExpiredMsg struct{}
+
+type SessionExpireErrMsg struct {
+	Err error
+}

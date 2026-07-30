@@ -9,6 +9,7 @@ type Operation string
 
 const (
 	OperationStart        Operation = "start"
+	OperationReconnect    Operation = "reconnect"
 	OperationCancelLogin  Operation = "cancel_login"
 	OperationLogout       Operation = "logout"
 	OperationSearchTracks Operation = "search_tracks"
@@ -84,6 +85,10 @@ func (f *Fake) Play(_ context.Context, uri string) error {
 
 func (f *Fake) Start(_ context.Context) error {
 	return f.record(Call{Operation: OperationStart})
+}
+
+func (f *Fake) Reconnect(_ context.Context) error {
+	return f.record(Call{Operation: OperationReconnect})
 }
 
 func (f *Fake) CancelLogin(_ context.Context) error {

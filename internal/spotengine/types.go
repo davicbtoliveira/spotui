@@ -1,6 +1,12 @@
 package spotengine
 
 type EventType string
+type ErrorKind string
+
+const (
+	ErrorKindTransient          ErrorKind = "transient"
+	ErrorKindCredentialRejected ErrorKind = "credential_rejected"
+)
 
 const (
 	EventTypeReady            EventType = "ready"
@@ -38,5 +44,6 @@ type Event struct {
 	VolumeMax  int
 	URL        string
 	Err        error
+	ErrorKind  ErrorKind
 	Product    string
 }
