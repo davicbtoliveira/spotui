@@ -456,9 +456,18 @@ func (m RootModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case msg.String() == "n" || msg.Type == tea.KeyEsc || msg.Type == tea.KeyEnter:
 			m.confirmingLogout = false
 			return m, nil
+		case msg.String() == KeyQuitAlt:
+			return m, tea.Quit
 		default:
 			return m, nil
 		}
+	}
+
+	if m.loggingOut {
+		if msg.String() == KeyQuitAlt {
+			return m, tea.Quit
+		}
+		return m, nil
 	}
 
 	if m.state == stateUnsupported {
@@ -487,6 +496,11 @@ func (m RootModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if msg.String() == KeyQuitAlt {
 			return m, tea.Quit
 		}
+		return m, nil
+	}
+
+	if m.state == stateReady && msg.String() == KeyLogout {
+		m.confirmingLogout = true
 		return m, nil
 	}
 
@@ -603,10 +617,6 @@ func (m RootModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		return m, commands.CmdSetEngineAutoplay(m.engine, !m.engineAutoplay)
-
-	case KeyLogout:
-		m.confirmingLogout = true
-		return m, nil
 
 	case KeyShuffle:
 		return m, commands.CmdShuffle(m.client, !m.shuffleOn)

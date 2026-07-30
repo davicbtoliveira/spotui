@@ -690,6 +690,26 @@ func TestLogoutConfirmationCanCancelWithoutChangingPlayback(t *testing.T) {
 	}
 }
 
+func TestLogoutLifecycleKeysRemainAvailableFromSearchInput(t *testing.T) {
+	m := newReadyModel()
+	m.searchInputActive = true
+	m.searchQuery = "hello"
+
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("L")})
+	m = updated.(RootModel)
+	if !m.confirmingLogout || m.searchQuery != "hello" {
+		t.Fatalf("L did not preserve search before confirmation: %#v", m)
+	}
+
+	_, quitCmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("q")})
+	if quitCmd == nil {
+		t.Fatal("q did not quit from Logout confirmation")
+	}
+	if _, ok := quitCmd().(tea.QuitMsg); !ok {
+		t.Fatalf("q command: want QuitMsg, got %T", quitCmd())
+	}
+}
+
 func TestConfirmedLogoutClearsAccountAndReturnsLoggedOut(t *testing.T) {
 	engine := spotengine.NewFake()
 	engine.SetHasSession(true)
