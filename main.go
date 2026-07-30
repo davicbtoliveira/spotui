@@ -8,7 +8,7 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/dcbto/spotui/internal/auth"
+	"github.com/dcbto/spotui/internal/browser"
 	"github.com/dcbto/spotui/internal/spotengine"
 	"github.com/dcbto/spotui/internal/tui"
 )
@@ -21,7 +21,7 @@ func main() {
 	}
 
 	p := tea.NewProgram(
-		tui.NewRootModel(engine, auth.OpenURL),
+		tui.NewRootModel(engine, browser.OpenURL),
 		tea.WithAltScreen(),
 		tea.WithMouseCellMotion(),
 	)

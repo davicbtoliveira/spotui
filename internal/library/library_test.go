@@ -6,59 +6,40 @@ import (
 	"github.com/dcbto/spotui/internal/library"
 )
 
-func TestMoveDownMovesCursor(t *testing.T) {
+func TestSearchCursorMovesWithinResults(t *testing.T) {
 	lib := library.New()
-	lib.SetPlaylists([]library.PlaylistEntry{
-		{Name: "A"}, {Name: "B"},
+	lib.SetSearchResults([]library.TrackEntry{
+		{Name: "A", URI: "spotify:track:a"},
+		{Name: "B", URI: "spotify:track:b"},
 	})
-	lib.MoveDown()
-	if lib.Cursor() != 1 {
-		t.Fatalf("want cursor 1, got %d", lib.Cursor())
-	}
-}
 
-func TestMoveDownClampsAtLast(t *testing.T) {
-	lib := library.New()
-	lib.SetPlaylists([]library.PlaylistEntry{{Name: "A"}})
 	lib.MoveDown()
-	if lib.Cursor() != 0 {
-		t.Fatalf("want clamp at 0, got %d", lib.Cursor())
-	}
-}
-
-func TestSetActiveTab(t *testing.T) {
-	lib := library.New()
-	lib.SetActiveTab(library.TabTracks)
-	if lib.ActiveTab() != library.TabTracks {
-		t.Fatalf("want TabArtists, got %v", lib.ActiveTab())
-	}
-}
-
-func TestSetTracksEnablesTrackCursor(t *testing.T) {
-	lib := library.New()
-	lib.SetTracks([]library.TrackEntry{{Name: "T1"}, {Name: "T2"}})
-	lib.SetActiveTab(library.TabTracks)
 	lib.MoveDown()
-	if lib.Cursor() != 1 {
-		t.Fatalf("want 1, got %d", lib.Cursor())
+	if got := lib.Cursor(); got != 1 {
+		t.Fatalf("cursor = %d, want 1", got)
 	}
-}
+	if got := lib.SelectedURI(); got != "spotify:track:b" {
+		t.Fatalf("selected URI = %q, want spotify:track:b", got)
+	}
 
-func TestMoveUpMovesCursor(t *testing.T) {
-	lib := library.New()
-	lib.SetPlaylists([]library.PlaylistEntry{{Name: "A"}, {Name: "B"}})
-	lib.MoveDown()
 	lib.MoveUp()
-	if lib.Cursor() != 0 {
-		t.Fatalf("want 0, got %d", lib.Cursor())
+	lib.MoveUp()
+	if got := lib.Cursor(); got != 0 {
+		t.Fatalf("cursor = %d, want 0", got)
 	}
 }
 
-func TestMoveUpClampsAtTop(t *testing.T) {
+func TestReplacingSearchResultsClampsCursor(t *testing.T) {
 	lib := library.New()
-	lib.SetPlaylists([]library.PlaylistEntry{{Name: "A"}})
-	lib.MoveUp()
-	if lib.Cursor() != 0 {
-		t.Fatalf("want 0, got %d", lib.Cursor())
+	lib.SetSearchResults([]library.TrackEntry{{URI: "a"}, {URI: "b"}})
+	lib.MoveDown()
+
+	lib.SetSearchResults(nil)
+
+	if got := lib.Cursor(); got != 0 {
+		t.Fatalf("cursor = %d, want 0", got)
+	}
+	if got := lib.SelectedURI(); got != "" {
+		t.Fatalf("selected URI = %q, want empty", got)
 	}
 }

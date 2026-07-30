@@ -13,7 +13,6 @@ func RenderHelpOverlay(width, height int) string {
 		"  Keyboard Shortcuts",
 		"  " + strings.Repeat("─", 30),
 		"",
-		"  1 / 2 / 3 / 4 Switch tabs (Playlists / Tracks / Artists / Search)",
 		"  /            Search tracks",
 		"  [ / ]        Previous / next search page",
 		"  esc          Cancel search input",
@@ -26,10 +25,12 @@ func RenderHelpOverlay(width, height int) string {
 		"  - / +        Lower / raise player volume",
 		"  a            Toggle Autoplay",
 		"  L            Log out",
-		"  s            Toggle shuffle",
-		"  c            Open Spotify account settings",
 		"  ?            Toggle this help",
 		"  q / ctrl+c   Quit",
+		"",
+		"  Login requires Spotify Premium.",
+		"  First Login: Linux and macOS local terminal.",
+		"  Uses an unofficial protocol; service changes may break it.",
 		"",
 	}, "\n")
 

@@ -3,6 +3,7 @@ package views
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/dcbto/spotui/internal/spotengine"
@@ -18,6 +19,38 @@ type EnginePlayerState struct {
 	Volume      int
 	Autoplay    bool
 	Transferred bool
+}
+
+func renderProgress(width, progress, total int) string {
+	if total <= 0 {
+		return theme.ProgressEmptyStyle.Render(strings.Repeat("░", width))
+	}
+	if progress > total {
+		progress = total
+	}
+	filled := int(float64(width) * float64(progress) / float64(total))
+	empty := width - filled
+	if empty < 0 {
+		empty = 0
+	}
+	return theme.ProgressStyle.Render(strings.Repeat("█", filled)) +
+		theme.ProgressEmptyStyle.Render(strings.Repeat("░", empty))
+}
+
+func formatDuration(ms int) string {
+	duration := time.Duration(ms) * time.Millisecond
+	return fmt.Sprintf("%02d:%02d", int(duration.Minutes()), int(duration.Seconds())%60)
+}
+
+func truncate(value string, maxLength int) string {
+	if maxLength < 4 {
+		maxLength = 4
+	}
+	runes := []rune(value)
+	if len(runes) <= maxLength {
+		return value
+	}
+	return string(runes[:maxLength-1]) + "…"
 }
 
 func RenderEnginePlayer(width int, state EnginePlayerState) string {

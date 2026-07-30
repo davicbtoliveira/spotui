@@ -5,16 +5,7 @@ package tui
 
 import "github.com/dcbto/spotui/internal/msgs"
 
-type AuthDoneMsg = msgs.AuthDoneMsg
-type AuthErrMsg = msgs.AuthErrMsg
-type UserLoadedMsg = msgs.UserLoadedMsg
-type PlaylistsLoadedMsg = msgs.PlaylistsLoadedMsg
-type TracksLoadedMsg = msgs.TracksLoadedMsg
-type TrackSearchLoadedMsg = msgs.TrackSearchLoadedMsg
 type EngineTrackSearchLoadedMsg = msgs.EngineTrackSearchLoadedMsg
-type ArtistsLoadedMsg = msgs.ArtistsLoadedMsg
-type NowPlayingMsg = msgs.NowPlayingMsg
-type TickMsg = msgs.TickMsg
 type ErrMsg = msgs.ErrMsg
 type ClearStatusMsg = msgs.ClearStatusMsg
 type ProgressTickMsg = msgs.ProgressTickMsg

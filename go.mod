@@ -6,9 +6,7 @@ require (
 	github.com/charmbracelet/bubbletea v1.3.10
 	github.com/charmbracelet/lipgloss v1.1.0
 	github.com/devgianlu/go-librespot v0.0.0-00010101000000-000000000000
-	github.com/zmb3/spotify/v2 v2.4.3
 	go.uber.org/goleak v1.3.0
-	golang.org/x/oauth2 v0.36.0
 )
 
 require (
@@ -34,6 +32,7 @@ require (
 	github.com/godbus/dbus/v5 v5.2.0 // indirect
 	github.com/grandcat/zeroconf v1.0.0 // indirect
 	github.com/jfreymuth/pulse v0.1.2-0.20241102120944-4ffb35054b53 // indirect
+	github.com/kr/text v0.1.0 // indirect
 	github.com/lucasb-eyer/go-colorful v1.3.0 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
 	github.com/mattn/go-localereader v0.0.1 // indirect
@@ -52,6 +51,7 @@ require (
 	golang.org/x/crypto v0.46.0 // indirect
 	golang.org/x/mod v0.31.0 // indirect
 	golang.org/x/net v0.48.0 // indirect
+	golang.org/x/oauth2 v0.36.0 // indirect
 	golang.org/x/sync v0.19.0 // indirect
 	golang.org/x/sys v0.39.0 // indirect
 	golang.org/x/text v0.32.0 // indirect
