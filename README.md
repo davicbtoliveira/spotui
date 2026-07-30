@@ -1,74 +1,98 @@
 # SpotUI
 
-Spotify TUI client written in Go. Controls Spotify playback from the terminal.
+SpotUI is a zero configuration Spotify terminal client with local audio
+playback. It runs as one process: no playback daemon, sidecar, developer
+dashboard setup, or official Spotify Web API client is required.
 
-> **Requires a Spotify Premium account.** Free accounts can browse the library but cannot start or control playback.
+> **Spotify Premium is required.** Free accounts are stopped after Login and
+> can only log out or quit.
+
+SpotUI uses an unofficial protocol through a pinned `go-librespot` fork. It can
+break when Spotify changes its service and is not affiliated with or endorsed
+by Spotify.
 
 ## Install
 
-Download the latest binary for your platform from the [releases page](https://github.com/dcbto/spotui/releases):
+Download the archive for your platform from the
+[releases page](https://github.com/dcbto/spotui/releases):
 
-| Platform | File |
-|----------|------|
-| Linux (x86_64) | `spotui-linux-amd64` |
-| macOS (Intel) | `spotui-darwin-amd64` |
-| macOS (Apple Silicon) | `spotui-darwin-arm64` |
-| Windows (x86_64) | `spotui-windows-amd64.exe` |
+| Platform | Archive |
+|----------|---------|
+| Linux x86_64 | `spotui-linux-amd64.tar.gz` |
+| macOS Intel | `spotui-darwin-amd64.tar.gz` |
+| macOS Apple Silicon | `spotui-darwin-arm64.tar.gz` |
+
+Windows is not supported and no Windows artifact is published. Each archive
+contains the `spotui` binary, `LICENSE`, and `THIRD_PARTY_NOTICES.md`.
 
 ```bash
-# Linux / macOS
-chmod +x spotui-linux-amd64
-./spotui-linux-amd64
+tar -xzf spotui-linux-amd64.tar.gz
+cd spotui-linux-amd64
+./spotui
 ```
 
-Windows: run `spotui-windows-amd64.exe` directly.
+Audio is sent to the operating system Default Audio Output. On Linux, SpotUI
+uses ALSA; on macOS, it uses AudioToolbox.
 
-## First Run
+## Login
 
-First launch shows the Logged-Out Screen without opening a browser. Press `Enter`
-to authorize SpotUI with Spotify. The private Local Session is saved to
-`~/.config/spotui/session.json` and reused on subsequent runs.
+The first launch stays on the Logged-Out screen. Press `Enter` to start Login
+and complete authorization in the browser.
 
-## Keybindings
+First Login must run in a local terminal on Linux or macOS. Remote SSH and
+headless first-login flows are not supported. If the browser cannot open,
+SpotUI shows the authorization URL so it can be copied without losing the
+Login attempt.
+
+The private Local Session is stored at `~/.config/spotui/session.json` with
+owner-only permissions and reused on later runs. `L` logs out and deletes it.
+SpotUI does not resume the previously playing track after startup or reconnect.
+
+## Controls
 
 | Key | Action |
 |-----|--------|
-| `1` | Playlists tab |
-| `2` | Tracks tab |
-| `3` | Artists tab |
-| `4` | Search tab |
 | `/` | Search tracks |
 | `[` / `]` | Previous / next search page |
 | `esc` | Cancel search input |
-| `j` / `↓` | Cursor down |
-| `k` / `↑` | Cursor up |
-| `enter` | Play selected |
-| `space` | Play / Pause |
+| `j` / `↓` | Move cursor down |
+| `k` / `↑` | Move cursor up |
+| `enter` | Play selected track |
+| `space` | Play / pause |
 | `n` | Next track |
 | `p` | Previous track |
-| `s` | Toggle shuffle |
-| `c` | Open Spotify account settings |
+| `-` / `+` | Lower / raise volume |
+| `a` | Toggle Autoplay |
+| `L` | Log out |
 | `?` | Toggle help |
 | `q` / `ctrl+c` | Quit |
 
-## Build from Source
+SpotUI also appears as a Spotify Connect device. Playback transferred to
+another device remains there; SpotUI does not steal it back automatically.
+Transient engine failures enter a visible reconnect state with bounded backoff.
+
+## Build from source
+
+Requirements:
+
+- Go version declared in `go.mod`
+- Spotify Premium account for manual playback validation
+- Linux: ALSA and FLAC development packages plus `pkg-config`
+- macOS: Xcode command-line tools, FLAC, and `pkg-config`
 
 ```bash
+go mod verify
 make build
 ./spotui
 ```
 
-## Contributing / Development
+Dependencies and the modified `go-librespot` fork revision are pinned by
+`go.mod` and `go.sum`. Automated tests use fakes and require no Spotify
+credentials, browser, network, or audio device:
 
 ```bash
-make run
+go test -race ./...
 ```
-
-## Requirements
-
-- Go 1.22+
-- Spotify Premium account (required for playback control)
-- A local Linux or macOS terminal for first-time browser Login
 
 ## License
 

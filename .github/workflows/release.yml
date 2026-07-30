@@ -3,42 +3,103 @@ name: Release
 on:
   push:
     tags:
-      - 'v*'
+      - "v*"
+
+permissions:
+  contents: read
 
 jobs:
-  release:
-    runs-on: ubuntu-latest
+  verify:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Install native audio dependencies
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev libflac-dev pkg-config
+
+      - name: Test without credentials, browser, network, or audio
+        run: go test -race ./...
+
+  build:
+    needs: verify
     strategy:
+      fail-fast: false
       matrix:
         include:
-          - goos: linux
+          - runner: ubuntu-24.04
+            goos: linux
             goarch: amd64
             suffix: linux-amd64
-          - goos: darwin
+            tar: tar
+          - runner: macos-15-intel
+            goos: darwin
             goarch: amd64
             suffix: darwin-amd64
-          - goos: darwin
+            tar: gtar
+          - runner: macos-15
+            goos: darwin
             goarch: arm64
             suffix: darwin-arm64
-          - goos: windows
-            goarch: amd64
-            suffix: windows-amd64.exe
+            tar: gtar
+    runs-on: ${{ matrix.runner }}
 
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-go@v5
         with:
-          go-version: '1.22'
+          go-version-file: go.mod
+          cache: true
 
-      - name: Build
+      - name: Install Linux audio dependencies
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev libflac-dev pkg-config
+
+      - name: Install macOS audio dependencies
+        if: runner.os == 'macOS'
+        run: brew install flac gnu-tar pkg-config
+
+      - name: Build standalone archive
         env:
+          CGO_ENABLED: "1"
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
-          SPOTIFY_CLIENT_ID: ${{ secrets.SPOTIFY_CLIENT_ID }}
         run: |
-          go build -ldflags "-X github.com/dcbto/spotui/internal/clientid.Value=$SPOTIFY_CLIENT_ID" -o spotui-${{ matrix.suffix }} ./main.go
+          archive="spotui-${{ matrix.suffix }}"
+          mkdir -p "dist/$archive"
+          go build -trimpath -buildvcs=false -ldflags="-s -w -buildid=" -o "dist/$archive/spotui" .
+          cp LICENSE THIRD_PARTY_NOTICES.md "dist/$archive/"
+          "${{ matrix.tar }}" --sort=name --mtime="@0" --owner=0 --group=0 --numeric-owner \
+            -cf - -C dist "$archive" | gzip -n > "dist/$archive.tar.gz"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: spotui-${{ matrix.suffix }}
+          path: dist/spotui-${{ matrix.suffix }}.tar.gz
+          if-no-files-found: error
+
+  release:
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: spotui-*
+          path: dist
+          merge-multiple: true
+
+      - name: Generate checksums
+        run: cd dist && sha256sum spotui-*.tar.gz > SHA256SUMS
 
       - uses: softprops/action-gh-release@v2
         with:
-          files: spotui-${{ matrix.suffix }}
+          files: |
+            dist/spotui-*.tar.gz
+            dist/SHA256SUMS
