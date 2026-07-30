@@ -32,7 +32,9 @@ cd spotui-linux-amd64
 ```
 
 Audio is sent to the operating system Default Audio Output. On Linux, SpotUI
-uses ALSA; on macOS, it uses AudioToolbox.
+uses PulseAudio when `PULSE_SERVER` or the WSLg PulseAudio socket is available,
+and otherwise uses ALSA. On macOS, it uses AudioToolbox. All backends are
+opened by go-librespot.
 
 ## Login
 

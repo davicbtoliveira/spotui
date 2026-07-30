@@ -10,6 +10,21 @@ import (
 	"github.com/devgianlu/go-librespot/daemon"
 )
 
+const wslgPulseServer = "/mnt/wslg/PulseServer"
+
+func audioOutput(goos, pulseServer string, hasWSLgPulseServer bool) (backend, runtimeSocket string) {
+	if goos == "darwin" {
+		return "audio-toolbox", ""
+	}
+	if pulseServer != "" {
+		return "pulseaudio", pulseServer
+	}
+	if hasWSLgPulseServer {
+		return "pulseaudio", "unix:" + wslgPulseServer
+	}
+	return "alsa", ""
+}
+
 func NewAdapter() (*Adapter, error) {
 	userConfigDir, err := os.UserConfigDir()
 	if err != nil {
@@ -41,23 +56,26 @@ func newAdapterAtDir(configDir string) (*Adapter, error) {
 			return nil, nil, err
 		}
 		server := newMemoryAPIServerWithEvents(events)
-		audioBackend := "alsa"
-		if runtime.GOOS == "darwin" {
-			audioBackend = "audio-toolbox"
-		}
+		_, wslgPulseErr := os.Stat(wslgPulseServer)
+		audioBackend, audioRuntimeSocket := audioOutput(
+			runtime.GOOS,
+			os.Getenv("PULSE_SERVER"),
+			wslgPulseErr == nil,
+		)
 
 		config := &daemon.Config{
-			DeviceName:      "SpotUI",
-			DeviceType:      "computer",
-			AudioBackend:    audioBackend,
-			AudioDevice:     "default",
-			Bitrate:         160,
-			VolumeSteps:     100,
-			InitialVolume:   100,
-			ZeroconfEnabled: true,
-			ZeroconfBackend: "builtin",
-			ImageSize:       "default",
-			DisableAutoplay: !autoplay,
+			DeviceName:                "SpotUI",
+			DeviceType:                "computer",
+			AudioBackend:              audioBackend,
+			AudioBackendRuntimeSocket: audioRuntimeSocket,
+			AudioDevice:               "default",
+			Bitrate:                   160,
+			VolumeSteps:               100,
+			InitialVolume:             100,
+			ZeroconfEnabled:           true,
+			ZeroconfBackend:           "builtin",
+			ImageSize:                 "default",
+			DisableAutoplay:           !autoplay,
 			Credentials: daemon.CredentialsConfig{
 				Type: "interactive",
 				Interactive: daemon.InteractiveCredentials{

@@ -8,12 +8,15 @@ Default Audio Output. Never record credentials or session-file contents.
 
 | Target | Fresh host | Output backend | Result | Evidence |
 |--------|------------|----------------|--------|----------|
-| Linux amd64 | Supported distribution, no SpotUI services installed | ALSA Default Audio Output | Pending | Release notes |
+| Linux amd64 | Supported distribution, no SpotUI services installed | PulseAudio or ALSA Default Audio Output | Pending | Release notes |
 | macOS amd64 | Intel Mac, no SpotUI services installed | AudioToolbox Default Audio Output | Pending | Release notes |
 | macOS arm64 | Apple Silicon Mac, no SpotUI services installed | AudioToolbox Default Audio Output | Pending | Release notes |
 
 `Pending` is intentional until a human runs the release candidate on real
 hardware. Automated tests do not replace audible playback validation.
+
+For Linux releases, validate ALSA on a native host and PulseAudio on a host
+with `PULSE_SERVER` configured or under WSLg.
 
 ## Per-platform procedure
 

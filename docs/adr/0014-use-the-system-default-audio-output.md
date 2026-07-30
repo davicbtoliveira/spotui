@@ -20,6 +20,10 @@ The first increment will open the operating system's default audio output:
 - Linux through the available go-librespot ALSA or PulseAudio backend;
 - macOS through go-librespot AudioToolbox.
 
+On Linux, SpotUI selects go-librespot PulseAudio when `PULSE_SERVER` is set or
+the WSLg PulseAudio socket is available. It otherwise selects go-librespot
+ALSA. Spotify search, playback, and audio output remain inside go-librespot.
+
 SpotUI will not include an audio-device selector or config file requirement in
 the first increment.
 
