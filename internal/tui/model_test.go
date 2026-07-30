@@ -589,6 +589,67 @@ func TestAutoplayToggleAppliesImmediatelyAndUpdatesPlayer(t *testing.T) {
 	}
 }
 
+func TestTransferredPlaybackBlocksControlsAndSearchReactivatesLocally(t *testing.T) {
+	engine := spotengine.NewFake()
+	m := NewRootModel(engine, func(string) error { return nil })
+	m.state = stateReady
+	m.width = 90
+	m.height = 24
+	m.engineTrack = &spotengine.Track{Name: "Remote Track", Artist: "Artist", DurationMS: 180000}
+	m.engineActive = true
+	m.enginePlaying = true
+
+	updated, _ := m.Update(msgs.EngineEventMsg{
+		Event: spotengine.Event{Type: spotengine.EventTypeInactive},
+	})
+	m = updated.(RootModel)
+	if view := m.View(); !strings.Contains(view, "Transferred Playback") {
+		t.Fatalf("transfer not rendered distinctly:\n%s", view)
+	}
+
+	for _, key := range []tea.KeyMsg{
+		{Type: tea.KeySpace},
+		{Type: tea.KeyRunes, Runes: []rune("n")},
+		{Type: tea.KeyRunes, Runes: []rune("p")},
+		{Type: tea.KeyRunes, Runes: []rune("+")},
+	} {
+		updated, cmd := m.Update(key)
+		m = updated.(RootModel)
+		if cmd != nil {
+			t.Fatalf("remote control key %q returned command", key.String())
+		}
+	}
+
+	m.library.SetActiveTab(library.TabSearch)
+	updated, _ = m.Update(msgs.EngineTrackSearchLoadedMsg{
+		Tracks: []spotengine.Track{{URI: "spotify:track:local", Name: "Local Track"}},
+		Total:  1,
+	})
+	m = updated.(RootModel)
+	updated, playCmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = updated.(RootModel)
+	if playCmd == nil {
+		t.Fatal("Search Result did not reactivate local playback")
+	}
+	_ = playCmd()
+	calls := engine.Calls()
+	if len(calls) != 1 || calls[0].Operation != spotengine.OperationPlay ||
+		calls[0].URI != "spotify:track:local" {
+		t.Fatalf("engine calls: %#v", calls)
+	}
+	if view := m.View(); !strings.Contains(view, "Transferred Playback") {
+		t.Fatal("command changed transfer state before Active event")
+	}
+
+	updated, _ = m.Update(msgs.EngineEventMsg{
+		Event: spotengine.Event{Type: spotengine.EventTypeActive},
+	})
+	m = updated.(RootModel)
+	if view := m.View(); strings.Contains(view, "Transferred Playback") {
+		t.Fatalf("Active event retained transfer state:\n%s", view)
+	}
+}
+
 func sendKey(m RootModel, key string) RootModel {
 	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(key)})
 	return updated.(RootModel)

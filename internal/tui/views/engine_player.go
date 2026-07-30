@@ -10,16 +10,21 @@ import (
 )
 
 type EnginePlayerState struct {
-	Track      *spotengine.Track
-	ProgressMS int
-	Playing    bool
-	Buffering  bool
-	Active     bool
-	Volume     int
-	Autoplay   bool
+	Track       *spotengine.Track
+	ProgressMS  int
+	Playing     bool
+	Buffering   bool
+	Active      bool
+	Volume      int
+	Autoplay    bool
+	Transferred bool
 }
 
 func RenderEnginePlayer(width int, state EnginePlayerState) string {
+	if state.Transferred && state.Track == nil {
+		content := theme.SubtextStyle.Render("  Transferred Playback — active on another device")
+		return theme.PlayerBarStyle.Copy().Width(width).Render(content)
+	}
 	if state.Track == nil {
 		content := theme.SubtextStyle.Render("  Ready — press / to search tracks")
 		return theme.PlayerBarStyle.Copy().Width(width).Render(content)
@@ -27,6 +32,8 @@ func RenderEnginePlayer(width int, state EnginePlayerState) string {
 
 	status := "Paused"
 	switch {
+	case state.Transferred:
+		status = "Transferred Playback"
 	case state.Buffering:
 		status = "Buffering"
 	case state.Playing:

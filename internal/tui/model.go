@@ -44,15 +44,16 @@ type RootModel struct {
 
 	library *library.Library
 
-	nowPlaying      *spotify.PlayerState
-	shuffleOn       bool
-	localProgressMs int
-	engineTrack     *spotengine.Track
-	enginePlaying   bool
-	engineBuffering bool
-	engineActive    bool
-	engineVolume    int
-	engineAutoplay  bool
+	nowPlaying        *spotify.PlayerState
+	shuffleOn         bool
+	localProgressMs   int
+	engineTrack       *spotengine.Track
+	enginePlaying     bool
+	engineBuffering   bool
+	engineActive      bool
+	engineVolume      int
+	engineAutoplay    bool
+	engineTransferred bool
 
 	statusMsg   string
 	statusIsErr bool
@@ -191,8 +192,12 @@ func (m RootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.enginePlaying = false
 		case spotengine.EventTypeActive:
 			m.engineActive = true
+			m.engineTransferred = false
 		case spotengine.EventTypeInactive:
 			m.engineActive = false
+			m.enginePlaying = false
+			m.engineBuffering = false
+			m.engineTransferred = true
 		case spotengine.EventTypeVolume:
 			if msg.Event.VolumeMax > 0 {
 				m.engineVolume = msg.Event.Volume * 100 / msg.Event.VolumeMax
@@ -491,18 +496,30 @@ func (m RootModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case KeySpace:
+		if m.engineTransferred {
+			return m, nil
+		}
 		if m.enginePlaying {
 			return m, commands.CmdPauseEngine(m.engine)
 		}
 		return m, commands.CmdResumeEngine(m.engine)
 
 	case KeyNext:
+		if m.engineTransferred {
+			return m, nil
+		}
 		return m, commands.CmdNextEngine(m.engine)
 
 	case KeyPrev:
+		if m.engineTransferred {
+			return m, nil
+		}
 		return m, commands.CmdPreviousEngine(m.engine)
 
 	case KeyVolumeDown:
+		if m.engineTransferred {
+			return m, nil
+		}
 		volume := m.engineVolume - 5
 		if volume < 0 {
 			volume = 0
@@ -510,6 +527,9 @@ func (m RootModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, commands.CmdSetEngineVolume(m.engine, volume)
 
 	case KeyVolumeUp:
+		if m.engineTransferred {
+			return m, nil
+		}
 		volume := m.engineVolume + 5
 		if volume > 100 {
 			volume = 100
@@ -517,7 +537,7 @@ func (m RootModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, commands.CmdSetEngineVolume(m.engine, volume)
 
 	case KeyAutoplay:
-		if m.engineTrack == nil {
+		if m.engineTrack == nil || m.engineTransferred {
 			return m, nil
 		}
 		return m, commands.CmdSetEngineAutoplay(m.engine, !m.engineAutoplay)
@@ -658,13 +678,14 @@ func (m RootModel) renderMain() string {
 	var player string
 	if m.client == nil || m.engineTrack != nil {
 		player = views.RenderEnginePlayer(m.width, views.EnginePlayerState{
-			Track:      m.engineTrack,
-			ProgressMS: m.localProgressMs,
-			Playing:    m.enginePlaying,
-			Buffering:  m.engineBuffering,
-			Active:     m.engineActive,
-			Volume:     m.engineVolume,
-			Autoplay:   m.engineAutoplay,
+			Track:       m.engineTrack,
+			ProgressMS:  m.localProgressMs,
+			Playing:     m.enginePlaying,
+			Buffering:   m.engineBuffering,
+			Active:      m.engineActive,
+			Volume:      m.engineVolume,
+			Autoplay:    m.engineAutoplay,
+			Transferred: m.engineTransferred,
 		})
 	} else {
 		player = views.RenderPlayer(m.width, m.nowPlaying, m.shuffleOn, m.localProgressMs)
