@@ -1,6 +1,9 @@
 package spotengine
 
 import (
+	"fmt"
+	"os"
+	"path/filepath"
 	"runtime"
 
 	librespot "github.com/devgianlu/go-librespot"
@@ -8,7 +11,21 @@ import (
 )
 
 func NewAdapter() (*Adapter, error) {
+	userConfigDir, err := os.UserConfigDir()
+	if err != nil {
+		return nil, fmt.Errorf("resolve user config directory: %w", err)
+	}
+	return newAdapterAtDir(filepath.Join(userConfigDir, "spotui"))
+}
+
+func newAdapterAtDir(configDir string) (*Adapter, error) {
 	server := newMemoryAPIServer()
+	store := newFileStateStore(filepath.Join(configDir, "session.json"))
+	state, err := store.Load()
+	if err != nil {
+		return nil, err
+	}
+	hasSession := state != nil && len(state.Credentials.Data) > 0
 
 	audioBackend := "alsa"
 	if runtime.GOOS == "darwin" {
@@ -39,7 +56,7 @@ func NewAdapter() (*Adapter, error) {
 	app, err := daemon.New(&daemon.Options{
 		Logger:     &librespot.NullLogger{},
 		Config:     config,
-		StateStore: newMemoryStateStore(),
+		StateStore: store,
 		APIServer:  server,
 		OnAuthURL: func(url string) {
 			server.emit(Event{Type: EventTypeAuthorizationURL, URL: url})
@@ -48,5 +65,7 @@ func NewAdapter() (*Adapter, error) {
 	if err != nil {
 		return nil, err
 	}
-	return newAdapter(app, server), nil
+	adapter := newAdapter(app, server)
+	adapter.hasSession = hasSession
+	return adapter, nil
 }

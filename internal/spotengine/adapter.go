@@ -19,8 +19,9 @@ type engineRuntime interface {
 }
 
 type Adapter struct {
-	runtime engineRuntime
-	server  *memoryAPIServer
+	runtime    engineRuntime
+	server     *memoryAPIServer
+	hasSession bool
 
 	mu        sync.Mutex
 	cancel    context.CancelFunc
@@ -28,6 +29,10 @@ type Adapter struct {
 	closeOnce sync.Once
 	closeDone chan struct{}
 	closeErr  error
+}
+
+func (a *Adapter) HasSession() bool {
+	return a.hasSession
 }
 
 func newAdapter(runtime engineRuntime, server *memoryAPIServer) *Adapter {

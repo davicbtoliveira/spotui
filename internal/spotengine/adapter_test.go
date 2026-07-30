@@ -215,7 +215,7 @@ func TestAdapterTranslatesPlaybackEvents(t *testing.T) {
 }
 
 func TestNewAdapterReturnsStableEngine(t *testing.T) {
-	adapter, err := NewAdapter()
+	adapter, err := newAdapterAtDir(t.TempDir())
 	if err != nil {
 		t.Fatalf("new adapter: %v", err)
 	}

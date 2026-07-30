@@ -35,6 +35,21 @@ type Fake struct {
 	errors      map[Operation]error
 	searchPage  SearchPage
 	searchError error
+	hasSession  bool
+}
+
+func (f *Fake) HasSession() bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	return f.hasSession
+}
+
+func (f *Fake) SetHasSession(hasSession bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	f.hasSession = hasSession
 }
 
 func NewFake() *Fake {

@@ -3,6 +3,7 @@ package spotengine
 import "context"
 
 type Engine interface {
+	HasSession() bool
 	Start(context.Context) error
 	SearchTracks(context.Context, SearchRequest) (SearchPage, error)
 	Play(context.Context, string) error
