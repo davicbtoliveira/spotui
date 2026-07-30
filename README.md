@@ -25,7 +25,9 @@ Windows: run `spotui-windows-amd64.exe` directly.
 
 ## First Run
 
-On first launch a browser window opens for Spotify login. After authorizing, the token is saved to `~/.config/spotui/token.json` and reused on subsequent runs.
+First launch shows the Logged-Out Screen without opening a browser. Press `Enter`
+to authorize SpotUI with Spotify. The private Local Session is saved to
+`~/.config/spotui/session.json` and reused on subsequent runs.
 
 ## Keybindings
 
@@ -52,23 +54,13 @@ On first launch a browser window opens for Spotify login. After authorizing, the
 ## Build from Source
 
 ```bash
-# Self-contained binary (ID baked in — no env var needed at runtime)
-SPOTIFY_CLIENT_ID=<your_id> make build
-./spotui
-
-# Binary without baked ID (requires SPOTIFY_CLIENT_ID env var at runtime)
 make build
-SPOTIFY_CLIENT_ID=<your_id> ./spotui
+./spotui
 ```
 
 ## Contributing / Development
 
-1. Go to https://developer.spotify.com/dashboard and create a new app
-2. Add `http://localhost:8080/callback` as a Redirect URI
-3. Copy the **Client ID** (no client secret needed)
-
 ```bash
-export SPOTIFY_CLIENT_ID=your_client_id_here
 make run
 ```
 
@@ -76,7 +68,7 @@ make run
 
 - Go 1.22+
 - Spotify Premium account (required for playback control)
-- An active Spotify session on any device before using playback controls
+- A local Linux or macOS terminal for first-time browser Login
 
 ## License
 
