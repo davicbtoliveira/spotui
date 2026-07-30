@@ -2,7 +2,8 @@
 
 Run this matrix before publishing a release. It requires a dedicated Spotify
 Premium test account and speakers or headphones connected to the system
-Default Audio Output. Never record credentials or session-file contents.
+Default Audio Output. Never record credentials, authorization URLs, or
+session-file contents.
 
 ## Supported platform matrix
 
@@ -16,7 +17,7 @@ Default Audio Output. Never record credentials or session-file contents.
 hardware. Automated tests do not replace audible playback validation.
 
 For Linux releases, validate ALSA on a native host and PulseAudio on a host
-with `PULSE_SERVER` configured or under WSLg.
+with `PULSE_SERVER` configured, a user PulseAudio socket, or under WSLg.
 
 ## Per-platform procedure
 
@@ -29,24 +30,35 @@ Use the release archive, not `go run`, so this also validates packaging.
 3. Start `spotui` from a local terminal. Confirm it remains logged out and does
    not open a browser until `Enter` is pressed.
 4. Complete Login in the browser with the Premium test account. Confirm the
-   private session file is created and search becomes available.
+   private session file is created and the browse shell opens on Liked Tracks.
 5. Restart SpotUI. Confirm the session is reused, no browser opens, and the
    previous track does not resume.
-6. Search for a known track. Verify title, artist, duration, pagination, cursor
-   stability, and selection.
-7. Press `Enter`. Confirm audio starts through the system Default Audio Output
-   and metadata, buffering, playing state, and progress update in the TUI.
-8. Verify play/pause, next, previous, volume down/up, and Autoplay.
-9. Select SpotUI from Spotify Connect, then transfer playback away. Confirm
-   SpotUI reports the transfer and does not steal playback back.
-10. Interrupt connectivity temporarily. Confirm a visible reconnect state,
+6. Exercise the browse shell. Confirm Liked Tracks, Playlists, Saved Albums, and
+   Recommended can be selected from navigation, and that `Tab` switches between
+   navigation and content focus.
+7. Open a playlist, album, and artist detail. Verify detail metadata, track
+   pagination with `[` and `]`, selected artwork when available, and playback
+   of a track in its album or playlist context.
+8. Press `/` and search for a known query. Confirm grouped Tracks, Albums,
+   Artists, and Playlists results, pagination, cursor movement, selection, and
+   the `o` external-link action. If a non-track group is unavailable, confirm
+   the UI labels it as unavailable instead of failing the whole search.
+9. Press `Enter` on a known track. Confirm audio starts through the system
+   Default Audio Output and metadata, buffering, playing state, and progress
+   update in the TUI.
+10. Verify play/pause, next, previous, volume down/up, Autoplay, Shuffle for a
+    contextual track, and ten-second backward/forward seeking.
+11. Select SpotUI from Spotify Connect, then transfer playback away. Confirm
+    SpotUI reports the transfer, disables local playback controls, and does not
+    steal playback back.
+12. Interrupt connectivity temporarily. Confirm a visible reconnect state,
     disabled search/playback controls, and recovery without browser Login or
     automatic track resume.
-11. Disconnect the output device and play a track. Confirm a visible error and
+13. Disconnect the output device and play a track. Confirm a visible error and
     a responsive terminal.
-12. Press `L`. Confirm playback stops, the session is deleted, and the logged
-    out screen returns.
-13. Quit. Confirm audio stops and no SpotUI process remains.
+14. Press `L`. Confirm playback stops, the session is deleted, the Autoplay
+    preference remains local, and the Logged-Out screen returns.
+15. Quit. Confirm audio stops and no SpotUI process remains.
 
 ## Free-account guard
 
@@ -65,8 +77,9 @@ Archive SHA-256:
 OS version:
 CPU:
 Output device:
+Catalog sections checked:
 Track URI:
-Steps 1-13:
+Steps 1-15:
 Free-account guard:
 Observed errors:
 Tester/date:
