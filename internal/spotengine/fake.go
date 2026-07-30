@@ -38,6 +38,7 @@ type Fake struct {
 	searchPage  SearchPage
 	searchError error
 	hasSession  bool
+	autoplay    bool
 }
 
 func (f *Fake) HasSession() bool {
@@ -56,9 +57,17 @@ func (f *Fake) SetHasSession(hasSession bool) {
 
 func NewFake() *Fake {
 	return &Fake{
-		events: make(chan Event, 16),
-		errors: make(map[Operation]error),
+		events:   make(chan Event, 16),
+		errors:   make(map[Operation]error),
+		autoplay: true,
 	}
+}
+
+func (f *Fake) AutoplayEnabled() bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	return f.autoplay
 }
 
 func (f *Fake) Emit(event Event) {
@@ -121,7 +130,13 @@ func (f *Fake) SetVolume(_ context.Context, volume int) error {
 }
 
 func (f *Fake) SetAutoplay(_ context.Context, enabled bool) error {
-	return f.record(Call{Operation: OperationSetAutoplay, Enabled: enabled})
+	if err := f.record(Call{Operation: OperationSetAutoplay, Enabled: enabled}); err != nil {
+		return err
+	}
+	f.mu.Lock()
+	f.autoplay = enabled
+	f.mu.Unlock()
+	return nil
 }
 
 func (f *Fake) Close(_ context.Context) error {

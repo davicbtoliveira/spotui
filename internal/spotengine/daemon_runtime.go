@@ -20,6 +20,11 @@ func NewAdapter() (*Adapter, error) {
 
 func newAdapterAtDir(configDir string) (*Adapter, error) {
 	store := newFileStateStore(filepath.Join(configDir, "session.json"))
+	preferences := newPreferenceStore(filepath.Join(configDir, "settings.json"))
+	autoplay, err := preferences.LoadAutoplay()
+	if err != nil {
+		return nil, err
+	}
 	state, err := store.Load()
 	if err != nil {
 		if clearErr := store.Clear(); clearErr != nil {
@@ -31,6 +36,10 @@ func newAdapterAtDir(configDir string) (*Adapter, error) {
 
 	events := make(chan Event, 64)
 	factory := func() (engineRuntime, *memoryAPIServer, error) {
+		autoplay, err := preferences.LoadAutoplay()
+		if err != nil {
+			return nil, nil, err
+		}
 		server := newMemoryAPIServerWithEvents(events)
 		audioBackend := "alsa"
 		if runtime.GOOS == "darwin" {
@@ -48,7 +57,7 @@ func newAdapterAtDir(configDir string) (*Adapter, error) {
 			ZeroconfEnabled: true,
 			ZeroconfBackend: "builtin",
 			ImageSize:       "default",
-			DisableAutoplay: false,
+			DisableAutoplay: !autoplay,
 			Credentials: daemon.CredentialsConfig{
 				Type: "interactive",
 				Interactive: daemon.InteractiveCredentials{
@@ -79,6 +88,8 @@ func newAdapterAtDir(configDir string) (*Adapter, error) {
 	adapter := newAdapter(app, server)
 	adapter.factory = factory
 	adapter.clearState = store.Clear
+	adapter.saveAutoplay = preferences.SaveAutoplay
 	adapter.hasSession = hasSession
+	adapter.autoplay = autoplay
 	return adapter, nil
 }

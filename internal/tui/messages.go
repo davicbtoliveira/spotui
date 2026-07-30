@@ -26,3 +26,4 @@ type BrowserOpenedMsg = msgs.BrowserOpenedMsg
 type BrowserOpenErrMsg = msgs.BrowserOpenErrMsg
 type LoginResetMsg = msgs.LoginResetMsg
 type LoginResetErrMsg = msgs.LoginResetErrMsg
+type AutoplayChangedMsg = msgs.AutoplayChangedMsg

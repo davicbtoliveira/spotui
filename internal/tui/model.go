@@ -51,6 +51,8 @@ type RootModel struct {
 	enginePlaying   bool
 	engineBuffering bool
 	engineActive    bool
+	engineVolume    int
+	engineAutoplay  bool
 
 	statusMsg   string
 	statusIsErr bool
@@ -76,10 +78,12 @@ const (
 
 func NewRootModel(engine spotengine.Engine, openURL func(string) error) RootModel {
 	model := RootModel{
-		state:   stateLoggedOut,
-		engine:  engine,
-		openURL: openURL,
-		library: library.New(),
+		state:          stateLoggedOut,
+		engine:         engine,
+		openURL:        openURL,
+		library:        library.New(),
+		engineVolume:   100,
+		engineAutoplay: engine.AutoplayEnabled(),
 	}
 	if engine.HasSession() {
 		model.state = stateLoading
@@ -189,6 +193,12 @@ func (m RootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.engineActive = true
 		case spotengine.EventTypeInactive:
 			m.engineActive = false
+		case spotengine.EventTypeVolume:
+			if msg.Event.VolumeMax > 0 {
+				m.engineVolume = msg.Event.Volume * 100 / msg.Event.VolumeMax
+			} else {
+				m.engineVolume = msg.Event.Volume
+			}
 		case spotengine.EventTypeSessionEnded:
 			if m.state == stateLoggedOut || m.state == stateCancelling || m.state == stateUnsupported {
 				return m, nil
@@ -232,6 +242,16 @@ func (m RootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.statusMsg = "Could not reset login: " + msg.Err.Error()
 		m.statusIsErr = true
 		return m, nil
+
+	case AutoplayChangedMsg:
+		m.engineAutoplay = msg.Enabled
+		if msg.Enabled {
+			m.statusMsg = "Autoplay enabled"
+		} else {
+			m.statusMsg = "Autoplay disabled"
+		}
+		m.statusIsErr = false
+		return m, commands.CmdClearStatus()
 
 	case UserLoadedMsg:
 		if msg.User.DisplayName != "" {
@@ -471,14 +491,36 @@ func (m RootModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case KeySpace:
-		playing := m.nowPlaying != nil && m.nowPlaying.Playing
-		return m, commands.CmdPlayPause(m.client, playing)
+		if m.enginePlaying {
+			return m, commands.CmdPauseEngine(m.engine)
+		}
+		return m, commands.CmdResumeEngine(m.engine)
 
 	case KeyNext:
-		return m, commands.CmdNext(m.client)
+		return m, commands.CmdNextEngine(m.engine)
 
 	case KeyPrev:
-		return m, commands.CmdPrevious(m.client)
+		return m, commands.CmdPreviousEngine(m.engine)
+
+	case KeyVolumeDown:
+		volume := m.engineVolume - 5
+		if volume < 0 {
+			volume = 0
+		}
+		return m, commands.CmdSetEngineVolume(m.engine, volume)
+
+	case KeyVolumeUp:
+		volume := m.engineVolume + 5
+		if volume > 100 {
+			volume = 100
+		}
+		return m, commands.CmdSetEngineVolume(m.engine, volume)
+
+	case KeyAutoplay:
+		if m.engineTrack == nil {
+			return m, nil
+		}
+		return m, commands.CmdSetEngineAutoplay(m.engine, !m.engineAutoplay)
 
 	case KeyShuffle:
 		return m, commands.CmdShuffle(m.client, !m.shuffleOn)
@@ -621,6 +663,8 @@ func (m RootModel) renderMain() string {
 			Playing:    m.enginePlaying,
 			Buffering:  m.engineBuffering,
 			Active:     m.engineActive,
+			Volume:     m.engineVolume,
+			Autoplay:   m.engineAutoplay,
 		})
 	} else {
 		player = views.RenderPlayer(m.width, m.nowPlaying, m.shuffleOn, m.localProgressMs)

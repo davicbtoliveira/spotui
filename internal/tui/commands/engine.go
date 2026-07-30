@@ -63,3 +63,46 @@ func CmdPlayEngineTrack(engine spotengine.Engine, uri string) tea.Cmd {
 		return nil
 	}
 }
+
+func CmdPauseEngine(engine spotengine.Engine) tea.Cmd {
+	return engineControl("pause", engine.Pause)
+}
+
+func CmdResumeEngine(engine spotengine.Engine) tea.Cmd {
+	return engineControl("resume", engine.Resume)
+}
+
+func CmdNextEngine(engine spotengine.Engine) tea.Cmd {
+	return engineControl("next track", engine.Next)
+}
+
+func CmdPreviousEngine(engine spotengine.Engine) tea.Cmd {
+	return engineControl("previous track", engine.Previous)
+}
+
+func CmdSetEngineVolume(engine spotengine.Engine, volume int) tea.Cmd {
+	return func() tea.Msg {
+		if err := engine.SetVolume(context.Background(), volume); err != nil {
+			return msgs.ErrMsg{Err: err, Context: "set volume"}
+		}
+		return nil
+	}
+}
+
+func CmdSetEngineAutoplay(engine spotengine.Engine, enabled bool) tea.Cmd {
+	return func() tea.Msg {
+		if err := engine.SetAutoplay(context.Background(), enabled); err != nil {
+			return msgs.ErrMsg{Err: err, Context: "set autoplay"}
+		}
+		return msgs.AutoplayChangedMsg{Enabled: enabled}
+	}
+}
+
+func engineControl(contextLabel string, control func(context.Context) error) tea.Cmd {
+	return func() tea.Msg {
+		if err := control(context.Background()); err != nil {
+			return msgs.ErrMsg{Err: err, Context: contextLabel}
+		}
+		return nil
+	}
+}

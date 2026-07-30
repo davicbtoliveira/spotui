@@ -137,3 +137,17 @@ func TestFakePublishesEngineEvents(t *testing.T) {
 		t.Fatalf("event: want %#v, got %#v", want, got)
 	}
 }
+
+func TestFakeAutoplayDefaultsOnAndChangesAtRuntime(t *testing.T) {
+	engine := spotengine.NewFake()
+	if !engine.AutoplayEnabled() {
+		t.Fatal("autoplay default: want enabled")
+	}
+
+	if err := engine.SetAutoplay(context.Background(), false); err != nil {
+		t.Fatalf("disable autoplay: %v", err)
+	}
+	if engine.AutoplayEnabled() {
+		t.Fatal("autoplay remained enabled")
+	}
+}

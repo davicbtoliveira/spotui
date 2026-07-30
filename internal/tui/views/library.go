@@ -23,6 +23,8 @@ func RenderHelpOverlay(width, height int) string {
 		"  space        Toggle play / pause",
 		"  n            Next track",
 		"  p            Previous track",
+		"  - / +        Lower / raise player volume",
+		"  a            Toggle Autoplay",
 		"  s            Toggle shuffle",
 		"  c            Open Spotify account settings",
 		"  ?            Toggle this help",

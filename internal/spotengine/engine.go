@@ -4,6 +4,7 @@ import "context"
 
 type Engine interface {
 	HasSession() bool
+	AutoplayEnabled() bool
 	Start(context.Context) error
 	CancelLogin(context.Context) error
 	Logout(context.Context) error

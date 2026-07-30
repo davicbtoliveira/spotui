@@ -21,12 +21,14 @@ type engineRuntime interface {
 type attemptFactory func() (engineRuntime, *memoryAPIServer, error)
 
 type Adapter struct {
-	runtime    engineRuntime
-	server     *memoryAPIServer
-	factory    attemptFactory
-	clearState func() error
-	events     chan Event
-	hasSession bool
+	runtime      engineRuntime
+	server       *memoryAPIServer
+	factory      attemptFactory
+	clearState   func() error
+	saveAutoplay func(bool) error
+	events       chan Event
+	hasSession   bool
+	autoplay     bool
 
 	mu         sync.Mutex
 	cancel     context.CancelFunc
@@ -42,6 +44,13 @@ func (a *Adapter) HasSession() bool {
 	defer a.mu.Unlock()
 
 	return a.hasSession
+}
+
+func (a *Adapter) AutoplayEnabled() bool {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+
+	return a.autoplay
 }
 
 func newAdapter(runtime engineRuntime, server *memoryAPIServer) *Adapter {
@@ -297,7 +306,18 @@ func (a *Adapter) SetVolume(ctx context.Context, volume int) error {
 }
 
 func (a *Adapter) SetAutoplay(ctx context.Context, enabled bool) error {
-	return a.command(ctx, daemon.ApiRequestTypeSetAutoplay, enabled)
+	if err := a.command(ctx, daemon.ApiRequestTypeSetAutoplay, enabled); err != nil {
+		return err
+	}
+	if a.saveAutoplay != nil {
+		if err := a.saveAutoplay(enabled); err != nil {
+			return err
+		}
+	}
+	a.mu.Lock()
+	a.autoplay = enabled
+	a.mu.Unlock()
+	return nil
 }
 
 func (a *Adapter) command(ctx context.Context, requestType daemon.ApiRequestType, data any) error {

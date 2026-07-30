@@ -15,6 +15,8 @@ type EnginePlayerState struct {
 	Playing    bool
 	Buffering  bool
 	Active     bool
+	Volume     int
+	Autoplay   bool
 }
 
 func RenderEnginePlayer(width int, state EnginePlayerState) string {
@@ -35,7 +37,13 @@ func RenderEnginePlayer(width int, state EnginePlayerState) string {
 	left := "  " + theme.TrackNameStyle.Render(truncate(track.Name, width/3)) +
 		theme.SubtextStyle.Render(" · ") +
 		theme.ArtistNameStyle.Render(truncate(track.Artist, width/3))
-	right := theme.SubtextStyle.Render(status)
+	autoplay := "Off"
+	if state.Autoplay {
+		autoplay = "On"
+	}
+	right := theme.SubtextStyle.Render(
+		fmt.Sprintf("%s · Vol %d%% · Autoplay %s", status, state.Volume, autoplay),
+	)
 	gap := width - lipgloss.Width(left) - lipgloss.Width(right) - 2
 	if gap < 1 {
 		gap = 1

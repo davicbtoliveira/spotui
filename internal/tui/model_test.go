@@ -466,6 +466,129 @@ func TestPlaybackEngineEventsDriveVisiblePlayerState(t *testing.T) {
 	}
 }
 
+func TestLocalPlaybackKeysUseEngineContext(t *testing.T) {
+	engine := spotengine.NewFake()
+	m := NewRootModel(engine, func(string) error { return nil })
+	m.state = stateReady
+	m.engineActive = true
+	m.enginePlaying = true
+
+	var commandsToRun []tea.Cmd
+	for _, key := range []tea.KeyMsg{
+		{Type: tea.KeySpace},
+		{Type: tea.KeyRunes, Runes: []rune("n")},
+		{Type: tea.KeyRunes, Runes: []rune("p")},
+	} {
+		updated, cmd := m.Update(key)
+		m = updated.(RootModel)
+		if cmd == nil {
+			t.Fatalf("key %q returned no command", key.String())
+		}
+		commandsToRun = append(commandsToRun, cmd)
+	}
+	for _, cmd := range commandsToRun {
+		if msg := cmd(); msg != nil {
+			if errMsg, ok := msg.(msgs.ErrMsg); ok {
+				t.Fatalf("control failed: %v", errMsg.Err)
+			}
+		}
+	}
+
+	want := []spotengine.Operation{
+		spotengine.OperationPause,
+		spotengine.OperationNext,
+		spotengine.OperationPrevious,
+	}
+	calls := engine.Calls()
+	if len(calls) != len(want) {
+		t.Fatalf("engine calls: %#v", calls)
+	}
+	for i, operation := range want {
+		if calls[i].Operation != operation {
+			t.Fatalf("call %d: want %q, got %#v", i, operation, calls[i])
+		}
+	}
+	if !m.enginePlaying {
+		t.Fatal("pause command changed state before engine event")
+	}
+}
+
+func TestVolumeEventsAndKeysStayEventDrivenAndClamped(t *testing.T) {
+	engine := spotengine.NewFake()
+	m := NewRootModel(engine, func(string) error { return nil })
+	m.state = stateReady
+	m.width = 80
+	m.height = 24
+	m.engineTrack = &spotengine.Track{Name: "Hello", DurationMS: 100000}
+
+	updated, _ := m.Update(msgs.EngineEventMsg{
+		Event: spotengine.Event{Type: spotengine.EventTypeVolume, Volume: 98, VolumeMax: 100},
+	})
+	m = updated.(RootModel)
+	if len(engine.Calls()) != 0 {
+		t.Fatalf("volume event caused feedback command: %#v", engine.Calls())
+	}
+	if view := m.View(); !strings.Contains(view, "Vol 98%") {
+		t.Fatalf("volume event not rendered:\n%s", view)
+	}
+
+	updated, volumeCmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("+")})
+	m = updated.(RootModel)
+	if volumeCmd == nil {
+		t.Fatal("+ returned no volume command")
+	}
+	_ = volumeCmd()
+	calls := engine.Calls()
+	if len(calls) != 1 || calls[0].Operation != spotengine.OperationSetVolume || calls[0].Volume != 100 {
+		t.Fatalf("volume calls: %#v", calls)
+	}
+	if view := m.View(); !strings.Contains(view, "Vol 98%") {
+		t.Fatal("volume command changed display before event")
+	}
+
+	updated, _ = m.Update(msgs.EngineEventMsg{
+		Event: spotengine.Event{Type: spotengine.EventTypeVolume, Volume: 100, VolumeMax: 100},
+	})
+	m = updated.(RootModel)
+	if view := m.View(); !strings.Contains(view, "Vol 100%") {
+		t.Fatalf("clamped volume not rendered:\n%s", view)
+	}
+}
+
+func TestAutoplayToggleAppliesImmediatelyAndUpdatesPlayer(t *testing.T) {
+	engine := spotengine.NewFake()
+	m := NewRootModel(engine, func(string) error { return nil })
+	m.state = stateReady
+	m.width = 80
+	m.height = 24
+	m.engineTrack = &spotengine.Track{Name: "Hello", DurationMS: 100000}
+	if view := m.View(); !strings.Contains(view, "Autoplay On") {
+		t.Fatalf("default autoplay not rendered:\n%s", view)
+	}
+
+	updated, toggleCmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("a")})
+	m = updated.(RootModel)
+	if toggleCmd == nil {
+		t.Fatal("a returned no autoplay command")
+	}
+	updated, _ = m.Update(toggleCmd())
+	m = updated.(RootModel)
+
+	if engine.AutoplayEnabled() {
+		t.Fatal("autoplay was not disabled at runtime")
+	}
+	view := m.View()
+	for _, want := range []string{"Autoplay Off", "Autoplay disabled"} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("autoplay view missing %q:\n%s", want, view)
+		}
+	}
+	calls := engine.Calls()
+	if len(calls) != 1 || calls[0].Operation != spotengine.OperationSetAutoplay || calls[0].Enabled {
+		t.Fatalf("autoplay calls: %#v", calls)
+	}
+}
+
 func sendKey(m RootModel, key string) RootModel {
 	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(key)})
 	return updated.(RootModel)
