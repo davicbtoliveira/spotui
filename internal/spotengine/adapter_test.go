@@ -484,6 +484,36 @@ func TestAdapterRetriesAttemptCreationAfterResetFailure(t *testing.T) {
 	}
 }
 
+func TestAdapterRetainsSessionWhenLogoutDeletionFails(t *testing.T) {
+	events := make(chan Event, 64)
+	firstRuntime := newLifecycleRuntime()
+	adapter := newAdapter(firstRuntime, newMemoryAPIServerWithEvents(events))
+	adapter.hasSession = true
+	want := errors.New("remove session")
+	adapter.clearState = func() error { return want }
+	adapter.factory = func() (engineRuntime, *memoryAPIServer, error) {
+		return newLifecycleRuntime(), newMemoryAPIServerWithEvents(events), nil
+	}
+
+	if err := adapter.Start(context.Background()); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	<-firstRuntime.started
+	if err := adapter.Logout(context.Background()); !errors.Is(err, want) {
+		t.Fatalf("logout error: want %v, got %v", want, err)
+	}
+	if !adapter.HasSession() {
+		t.Fatal("failed deletion reported session removed")
+	}
+
+	if err := adapter.Start(context.Background()); err != nil {
+		t.Fatalf("restart after failed deletion: %v", err)
+	}
+	if err := adapter.Close(context.Background()); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+}
+
 func TestAdapterPlaysTrackThroughInMemoryRequest(t *testing.T) {
 	defer goleak.VerifyNone(t, goleak.IgnoreCurrent())
 

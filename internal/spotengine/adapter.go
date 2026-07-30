@@ -141,7 +141,10 @@ func (a *Adapter) stop(ctx context.Context, restart, clearState, final bool) err
 			cancel()
 		}
 		go func() {
-			closeErr := runtime.Close()
+			var closeErr error
+			if runtime != nil {
+				closeErr = runtime.Close()
+			}
 			var runErr error
 			if runDone != nil {
 				runErr = <-runDone
@@ -149,16 +152,23 @@ func (a *Adapter) stop(ctx context.Context, restart, clearState, final bool) err
 			if errors.Is(runErr, context.Canceled) {
 				runErr = nil
 			}
-			stopErr := errors.Join(closeErr, runErr, server.Close())
+			var serverErr error
+			if server != nil {
+				serverErr = server.Close()
+			}
+			stopErr := errors.Join(closeErr, runErr, serverErr)
+			clearSucceeded := !clearState || a.clearState == nil
 			if clearState && a.clearState != nil {
-				stopErr = errors.Join(stopErr, a.clearState())
+				clearErr := a.clearState()
+				clearSucceeded = clearErr == nil
+				stopErr = errors.Join(stopErr, clearErr)
 			}
 			if restart {
 				drainEvents(a.events)
 			}
 			var nextRuntime engineRuntime
 			var nextServer *memoryAPIServer
-			if restart && a.factory != nil {
+			if restart && a.factory != nil && !(clearState && clearSucceeded) {
 				var err error
 				nextRuntime, nextServer, err = a.factory()
 				stopErr = errors.Join(stopErr, err)
@@ -168,7 +178,7 @@ func (a *Adapter) stop(ctx context.Context, restart, clearState, final bool) err
 			a.cancel = nil
 			a.runDone = nil
 			a.stopErr = stopErr
-			if clearState {
+			if clearState && clearSucceeded {
 				a.hasSession = false
 			}
 			if final {

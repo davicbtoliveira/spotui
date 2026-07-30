@@ -1,13 +1,16 @@
 package spotengine
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	librespot "github.com/devgianlu/go-librespot"
+	"go.uber.org/goleak"
 )
 
 func TestFileStateStoreMakesCredentialsReusable(t *testing.T) {
@@ -123,5 +126,79 @@ func TestCorruptLocalSessionRecoversToLoggedOutAdapter(t *testing.T) {
 		if strings.HasSuffix(entry.Name(), ".tmp") {
 			t.Fatalf("temporary session leaked after recovery: %s", entry.Name())
 		}
+	}
+}
+
+func TestAdapterLogoutRemovesSessionArtifactsAndKeepsPreferences(t *testing.T) {
+	defer goleak.VerifyNone(t, goleak.IgnoreCurrent())
+
+	configDir := t.TempDir()
+	sessionPath := filepath.Join(configDir, "session.json")
+	state := &librespot.AppState{DeviceId: "device-id"}
+	state.Credentials.Username = "listener"
+	state.Credentials.Data = []byte("credential")
+	if err := newFileStateStore(sessionPath).Save(state); err != nil {
+		t.Fatalf("save session: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(configDir, ".session-stale.tmp"), []byte("secret"), 0o600); err != nil {
+		t.Fatalf("write stale session replacement: %v", err)
+	}
+	preferences := newPreferenceStore(filepath.Join(configDir, "settings.json"))
+	if err := preferences.SaveAutoplay(false); err != nil {
+		t.Fatalf("save preferences: %v", err)
+	}
+
+	adapter, err := newAdapterAtDir(configDir)
+	if err != nil {
+		t.Fatalf("new adapter: %v", err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	if err := adapter.Logout(ctx); err != nil {
+		t.Fatalf("logout: %v", err)
+	}
+	if adapter.HasSession() {
+		t.Fatal("logout retained Local Session")
+	}
+	for _, path := range []string{sessionPath, filepath.Join(configDir, ".session-stale.tmp")} {
+		if _, err := os.Stat(path); !os.IsNotExist(err) {
+			t.Fatalf("session artifact remains at %s: %v", path, err)
+		}
+	}
+	autoplay, err := preferences.LoadAutoplay()
+	if err != nil {
+		t.Fatalf("load preferences: %v", err)
+	}
+	if autoplay {
+		t.Fatal("logout removed Autoplay preference")
+	}
+	if err := adapter.Close(ctx); err != nil {
+		t.Fatalf("close after logout: %v", err)
+	}
+}
+
+func TestAdapterClosePreservesReusableLocalSession(t *testing.T) {
+	configDir := t.TempDir()
+	sessionPath := filepath.Join(configDir, "session.json")
+	state := &librespot.AppState{DeviceId: "device-id"}
+	state.Credentials.Username = "listener"
+	state.Credentials.Data = []byte("credential")
+	if err := newFileStateStore(sessionPath).Save(state); err != nil {
+		t.Fatalf("save session: %v", err)
+	}
+
+	adapter, err := newAdapterAtDir(configDir)
+	if err != nil {
+		t.Fatalf("new adapter: %v", err)
+	}
+	if err := adapter.Close(context.Background()); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+	loaded, err := newFileStateStore(sessionPath).Load()
+	if err != nil {
+		t.Fatalf("load preserved session: %v", err)
+	}
+	if loaded == nil || len(loaded.Credentials.Data) == 0 {
+		t.Fatal("close removed reusable Local Session")
 	}
 }

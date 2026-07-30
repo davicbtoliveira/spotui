@@ -85,3 +85,9 @@ type LoginResetErrMsg struct {
 type AutoplayChangedMsg struct {
 	Enabled bool
 }
+
+type LogoutDoneMsg struct{}
+
+type LogoutErrMsg struct {
+	Err error
+}

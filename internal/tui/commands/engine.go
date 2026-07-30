@@ -52,7 +52,12 @@ func CmdResetLogin(engine spotengine.Engine, clearSession bool) tea.Cmd {
 }
 
 func CmdLogout(engine spotengine.Engine) tea.Cmd {
-	return CmdResetLogin(engine, true)
+	return func() tea.Msg {
+		if err := engine.Logout(context.Background()); err != nil {
+			return msgs.LogoutErrMsg{Err: err}
+		}
+		return msgs.LogoutDoneMsg{}
+	}
 }
 
 func CmdPlayEngineTrack(engine spotengine.Engine, uri string) tea.Cmd {

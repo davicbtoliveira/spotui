@@ -254,9 +254,11 @@ func TestFreeAccountBlocksPlayerUntilLogout(t *testing.T) {
 	}
 	updated, logoutCmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("L")})
 	m = updated.(RootModel)
-	if logoutCmd == nil {
-		t.Fatal("L returned no logout command")
+	if logoutCmd != nil {
+		t.Fatal("L logged out before confirmation")
 	}
+	updated, logoutCmd = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("y")})
+	m = updated.(RootModel)
 	updated, _ = m.Update(logoutCmd())
 	m = updated.(RootModel)
 	if m.state != stateLoggedOut || engine.HasSession() {
@@ -647,6 +649,120 @@ func TestTransferredPlaybackBlocksControlsAndSearchReactivatesLocally(t *testing
 	m = updated.(RootModel)
 	if view := m.View(); strings.Contains(view, "Transferred Playback") {
 		t.Fatalf("Active event retained transfer state:\n%s", view)
+	}
+}
+
+func TestLogoutConfirmationCanCancelWithoutChangingPlayback(t *testing.T) {
+	engine := spotengine.NewFake()
+	m := NewRootModel(engine, func(string) error { return nil })
+	m.state = stateReady
+	m.width = 80
+	m.height = 24
+	m.engineTrack = &spotengine.Track{Name: "Hello", DurationMS: 100000}
+	m.enginePlaying = true
+	m.localProgressMs = 12000
+
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("L")})
+	m = updated.(RootModel)
+	if cmd != nil {
+		t.Fatal("L changed playback before confirmation")
+	}
+	view := m.View()
+	for _, want := range []string{"Log out", "y/N"} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("confirmation missing %q:\n%s", want, view)
+		}
+	}
+
+	updated, cmd = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("n")})
+	m = updated.(RootModel)
+	if cmd != nil {
+		t.Fatal("cancel returned command")
+	}
+	if !m.enginePlaying || m.localProgressMs != 12000 {
+		t.Fatalf("playback changed after cancel: playing=%v progress=%d", m.enginePlaying, m.localProgressMs)
+	}
+	if view = m.View(); !strings.Contains(view, "Hello") || strings.Contains(view, "y/N") {
+		t.Fatalf("previous view not restored:\n%s", view)
+	}
+	if len(engine.Calls()) != 0 {
+		t.Fatalf("engine called after cancel: %#v", engine.Calls())
+	}
+}
+
+func TestConfirmedLogoutClearsAccountAndReturnsLoggedOut(t *testing.T) {
+	engine := spotengine.NewFake()
+	engine.SetHasSession(true)
+	m := NewRootModel(engine, func(string) error { return nil })
+	m.state = stateReady
+	m.width = 80
+	m.height = 24
+	m.client = &spotify.Client{}
+	m.username = "Ada"
+	m.loadedFlags = loadedAll
+	m.engineTrack = &spotengine.Track{Name: "Hello", DurationMS: 100000}
+	m.enginePlaying = true
+	m.library.SetActiveTab(library.TabSearch)
+	m.library.SetSearchResults([]library.TrackEntry{{Name: "Hello", URI: "spotify:track:hello"}})
+
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("L")})
+	m = updated.(RootModel)
+	updated, logoutCmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("y")})
+	m = updated.(RootModel)
+	if logoutCmd == nil {
+		t.Fatal("confirmation returned no Logout command")
+	}
+	if m.state != stateReady {
+		t.Fatal("model reported logged out before engine completion")
+	}
+	updated, _ = m.Update(logoutCmd())
+	m = updated.(RootModel)
+
+	if m.state != stateLoggedOut || engine.HasSession() {
+		t.Fatalf("logout state=%v hasSession=%v", m.state, engine.HasSession())
+	}
+	if m.client != nil || m.username != "" || m.engineTrack != nil ||
+		m.library.SearchResultCount() != 0 || m.loadedFlags != 0 {
+		t.Fatalf("account data retained after logout: %#v", m)
+	}
+	if view := m.View(); !strings.Contains(view, "Log in with Spotify") ||
+		strings.Contains(view, "Logging out") {
+		t.Fatalf("logged-out view incorrect:\n%s", view)
+	}
+	calls := engine.Calls()
+	if len(calls) != 1 || calls[0].Operation != spotengine.OperationLogout {
+		t.Fatalf("engine calls: %#v", calls)
+	}
+}
+
+func TestLogoutDeletionFailureDoesNotReportSuccess(t *testing.T) {
+	engine := spotengine.NewFake()
+	engine.SetHasSession(true)
+	engine.SetError(spotengine.OperationLogout, errors.New("permission denied"))
+	m := NewRootModel(engine, func(string) error { return nil })
+	m.state = stateReady
+	m.width = 80
+	m.height = 24
+	m.engineTrack = &spotengine.Track{Name: "Hello", DurationMS: 100000}
+
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("L")})
+	m = updated.(RootModel)
+	updated, logoutCmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("y")})
+	m = updated.(RootModel)
+	updated, restartCmd := m.Update(logoutCmd())
+	m = updated.(RootModel)
+
+	if m.state == stateLoggedOut || !engine.HasSession() {
+		t.Fatalf("failed deletion reported success: state=%v hasSession=%v", m.state, engine.HasSession())
+	}
+	if m.state != stateLoading || restartCmd == nil {
+		t.Fatalf("failed deletion did not recover engine: state=%v cmd=%v", m.state, restartCmd)
+	}
+	if !strings.Contains(m.statusMsg, "permission denied") {
+		t.Fatalf("logout failure missing detail: %q", m.statusMsg)
+	}
+	if _, ok := restartCmd().(msgs.EngineStartedMsg); !ok {
+		t.Fatal("logout failure did not restart engine")
 	}
 }
 

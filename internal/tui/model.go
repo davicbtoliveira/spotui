@@ -55,9 +55,11 @@ type RootModel struct {
 	engineAutoplay    bool
 	engineTransferred bool
 
-	statusMsg   string
-	statusIsErr bool
-	showHelp    bool
+	statusMsg        string
+	statusIsErr      bool
+	showHelp         bool
+	confirmingLogout bool
+	loggingOut       bool
 
 	searchInputActive bool
 	searchQuery       string
@@ -258,6 +260,27 @@ func (m RootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.statusIsErr = false
 		return m, commands.CmdClearStatus()
 
+	case LogoutDoneMsg:
+		m.clearAccount()
+		m.state = stateLoggedOut
+		m.confirmingLogout = false
+		m.loggingOut = false
+		m.authURL = ""
+		m.statusMsg = ""
+		m.statusIsErr = false
+		return m, nil
+
+	case LogoutErrMsg:
+		m.confirmingLogout = false
+		m.loggingOut = false
+		m.statusMsg = "Logout failed: " + msg.Err.Error()
+		m.statusIsErr = true
+		m.enginePlaying = false
+		m.engineBuffering = false
+		m.engineActive = false
+		m.state = stateLoading
+		return m, commands.CmdStartEngine(m.engine)
+
 	case UserLoadedMsg:
 		if msg.User.DisplayName != "" {
 			m.username = msg.User.DisplayName
@@ -382,6 +405,30 @@ func (m *RootModel) checkReady() {
 	}
 }
 
+func (m *RootModel) clearAccount() {
+	m.client = nil
+	m.trackSearcher = nil
+	m.username = ""
+	m.library = library.New()
+	m.nowPlaying = nil
+	m.shuffleOn = false
+	m.localProgressMs = 0
+	m.engineTrack = nil
+	m.enginePlaying = false
+	m.engineBuffering = false
+	m.engineActive = false
+	m.engineTransferred = false
+	m.engineVolume = 100
+	m.engineAutoplay = m.engine.AutoplayEnabled()
+	m.searchInputActive = false
+	m.searchQuery = ""
+	m.searchLoading = false
+	m.searchCompleted = false
+	m.searchOffset = 0
+	m.searchTotal = 0
+	m.loadedFlags = 0
+}
+
 func (m *RootModel) waitEngineEvent() tea.Cmd {
 	if m.waitingEngine {
 		return nil
@@ -400,12 +447,27 @@ func (m RootModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, tea.Quit
 	}
 
+	if m.confirmingLogout {
+		switch {
+		case msg.String() == "y":
+			m.confirmingLogout = false
+			m.loggingOut = true
+			return m, commands.CmdLogout(m.engine)
+		case msg.String() == "n" || msg.Type == tea.KeyEsc || msg.Type == tea.KeyEnter:
+			m.confirmingLogout = false
+			return m, nil
+		default:
+			return m, nil
+		}
+	}
+
 	if m.state == stateUnsupported {
 		switch msg.String() {
 		case KeyQuitAlt:
 			return m, tea.Quit
 		case KeyLogout:
-			return m, commands.CmdLogout(m.engine)
+			m.confirmingLogout = true
+			return m, nil
 		default:
 			return m, nil
 		}
@@ -542,6 +604,10 @@ func (m RootModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, commands.CmdSetEngineAutoplay(m.engine, !m.engineAutoplay)
 
+	case KeyLogout:
+		m.confirmingLogout = true
+		return m, nil
+
 	case KeyShuffle:
 		return m, commands.CmdShuffle(m.client, !m.shuffleOn)
 
@@ -622,6 +688,19 @@ func (m RootModel) View() string {
 			theme.ErrorStyle.Render("Terminal too small"))
 	}
 
+	if m.confirmingLogout {
+		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center,
+			lipgloss.JoinVertical(lipgloss.Center,
+				theme.TopBarTitle.Render("Log out of Spotify?"),
+				theme.SubtextStyle.Render("Playback will stop and the Local Session will be removed."),
+				theme.SubtextStyle.Render("Confirm? y/N"),
+			))
+	}
+	if m.loggingOut {
+		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center,
+			theme.SubtextStyle.Render("Logging out..."))
+	}
+
 	switch m.state {
 	case stateLoggedOut:
 		rows := []string{
@@ -653,8 +732,12 @@ func (m RootModel) View() string {
 		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center,
 			theme.SubtextStyle.Render("Closing Spotify login..."))
 	case stateLoading:
+		rows := []string{theme.SubtextStyle.Render("Loading your library...")}
+		if m.statusMsg != "" {
+			rows = append(rows, theme.ErrorStyle.Render(m.statusMsg))
+		}
 		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center,
-			theme.SubtextStyle.Render("Loading your library..."))
+			lipgloss.JoinVertical(lipgloss.Center, rows...))
 	case stateUnsupported:
 		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center,
 			lipgloss.JoinVertical(lipgloss.Center,
