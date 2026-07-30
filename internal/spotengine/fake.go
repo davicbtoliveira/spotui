@@ -1,0 +1,130 @@
+package spotengine
+
+import (
+	"context"
+	"sync"
+)
+
+type Operation string
+
+const (
+	OperationStart        Operation = "start"
+	OperationSearchTracks Operation = "search_tracks"
+	OperationPlay         Operation = "play"
+	OperationPause        Operation = "pause"
+	OperationResume       Operation = "resume"
+	OperationNext         Operation = "next"
+	OperationPrevious     Operation = "previous"
+	OperationSetVolume    Operation = "set_volume"
+	OperationSetAutoplay  Operation = "set_autoplay"
+	OperationClose        Operation = "close"
+)
+
+type Call struct {
+	Operation Operation
+	URI       string
+	Search    SearchRequest
+	Volume    int
+	Enabled   bool
+}
+
+type Fake struct {
+	mu          sync.Mutex
+	calls       []Call
+	events      chan Event
+	errors      map[Operation]error
+	searchPage  SearchPage
+	searchError error
+}
+
+func NewFake() *Fake {
+	return &Fake{
+		events: make(chan Event, 16),
+		errors: make(map[Operation]error),
+	}
+}
+
+func (f *Fake) Emit(event Event) {
+	f.events <- event
+}
+
+func (f *Fake) Events() <-chan Event {
+	return f.events
+}
+
+func (f *Fake) Play(_ context.Context, uri string) error {
+	return f.record(Call{Operation: OperationPlay, URI: uri})
+}
+
+func (f *Fake) Start(_ context.Context) error {
+	return f.record(Call{Operation: OperationStart})
+}
+
+func (f *Fake) SearchTracks(_ context.Context, request SearchRequest) (SearchPage, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	f.calls = append(f.calls, Call{Operation: OperationSearchTracks, Search: request})
+	if err := f.errors[OperationSearchTracks]; err != nil {
+		return SearchPage{}, err
+	}
+	return f.searchPage, f.searchError
+}
+
+func (f *Fake) Pause(_ context.Context) error {
+	return f.record(Call{Operation: OperationPause})
+}
+
+func (f *Fake) Resume(_ context.Context) error {
+	return f.record(Call{Operation: OperationResume})
+}
+
+func (f *Fake) Next(_ context.Context) error {
+	return f.record(Call{Operation: OperationNext})
+}
+
+func (f *Fake) Previous(_ context.Context) error {
+	return f.record(Call{Operation: OperationPrevious})
+}
+
+func (f *Fake) SetVolume(_ context.Context, volume int) error {
+	return f.record(Call{Operation: OperationSetVolume, Volume: volume})
+}
+
+func (f *Fake) SetAutoplay(_ context.Context, enabled bool) error {
+	return f.record(Call{Operation: OperationSetAutoplay, Enabled: enabled})
+}
+
+func (f *Fake) Close(_ context.Context) error {
+	return f.record(Call{Operation: OperationClose})
+}
+
+func (f *Fake) SetSearchResult(page SearchPage, err error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	f.searchPage = page
+	f.searchError = err
+}
+
+func (f *Fake) SetError(operation Operation, err error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	f.errors[operation] = err
+}
+
+func (f *Fake) record(call Call) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	f.calls = append(f.calls, call)
+	return f.errors[call.Operation]
+}
+
+func (f *Fake) Calls() []Call {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	return append([]Call(nil), f.calls...)
+}
