@@ -37,6 +37,11 @@ The fork prevents playback restarts from waiting forever when a PulseAudio
 server, including WSLg, omits its started event after an underflow. See commits
 `5c744c2` and `82efa3c`.
 
+The repository also carries the exact go-librespot fork source under
+`third_party/go-librespot`. SpotUI adds the `ApiRequestTypeNativeCatalog`
+request there so library and detail tabs use authenticated native spclient
+catalog reads instead of the public Web API quota.
+
 The complete corresponding source for SpotUI and the modified go-librespot and
 pulse forks is available at the repositories linked above. Binary distributions
 must include this notice and `LICENSE`, and must provide equivalent access to

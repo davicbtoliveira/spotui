@@ -45,6 +45,21 @@ Web API dependency from the SpotUI search path.
 Bubble Tea commands will call only SpotUI interfaces. Player events will enter
 the TUI as messages and remain the source of truth.
 
+## Amendment: Native Catalog Reads
+
+Catalog tabs must not use `ApiRequestTypeWebApi`. The shared public Web API
+application quota caused every library/detail/recommendation view to fail with
+`the app has exceeded its rate limits`, especially when Recommended fanned out
+over several artists. The pinned go-librespot fork now exposes one
+`ApiRequestTypeNativeCatalog` seam backed by authenticated spclient context
+resolution and extended metadata. Library, playlist, album, artist, top, and
+search reads use this seam; Recommended is intentionally bounded to the native
+collection-derived pages and does not fan out into additional requests.
+
+The fork is kept in `third_party/go-librespot` so the native request contract
+and its implementation are built from the repository rather than depending on
+an untracked module-cache edit.
+
 ## Consequences
 
 - The application remains one process and one installed executable.

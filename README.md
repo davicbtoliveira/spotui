@@ -93,9 +93,9 @@ make build
 ./spotui
 ```
 
-Dependencies and the modified `go-librespot` fork revision are pinned by
-`go.mod` and `go.sum`. Automated tests use fakes and require no Spotify
-credentials, browser, network, or audio device:
+Dependencies and the modified `go-librespot` fork source are pinned in
+`third_party/go-librespot` and selected by `go.mod`. Automated tests use fakes
+and require no Spotify credentials, browser, network, or audio device:
 
 ```bash
 go test -race ./...

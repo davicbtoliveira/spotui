@@ -4,8 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"net/url"
-	"strconv"
 	"strings"
 
 	"github.com/devgianlu/go-librespot/daemon"
@@ -75,12 +73,6 @@ type spotifySavedTrack struct {
 type spotifySavedAlbum struct {
 	Album spotifyAlbum `json:"album"`
 }
-type spotifySearchResponse struct {
-	Tracks    spotifyPage `json:"tracks"`
-	Albums    spotifyPage `json:"albums"`
-	Artists   spotifyPage `json:"artists"`
-	Playlists spotifyPage `json:"playlists"`
-}
 
 // PlaylistContextLoader is the narrow seam for followed/non-owned contexts.
 // The fork integration can provide it without leaking protocol types to the TUI.
@@ -90,32 +82,19 @@ func (a *Adapter) SetPlaylistContextLoader(loader PlaylistContextLoader) {
 	a.playlistContextLoader = loader
 }
 
-func (a *Adapter) webAPIGet(ctx context.Context, path string, query url.Values, out any) error {
-	response, err := a.server.request(ctx, daemon.ApiRequestTypeWebApi, daemon.ApiRequestDataWebApi{
-		Method: "GET", Path: path, Query: query,
-	})
+func (a *Adapter) nativeCatalogGet(ctx context.Context, data daemon.ApiRequestDataNativeCatalog, out any) error {
+	response, err := a.server.request(ctx, daemon.ApiRequestTypeNativeCatalog, data)
 	if err != nil {
 		return err
 	}
-	data, err := json.Marshal(response)
-	if err != nil {
-		return fmt.Errorf("encode web api response: %w", err)
+	nativeResponse, ok := response.(daemon.ApiResponseNativeCatalog)
+	if !ok {
+		return fmt.Errorf("decode native catalog response: unexpected %T", response)
 	}
-	if err := json.Unmarshal(data, out); err != nil {
-		return fmt.Errorf("decode web api response: %w", err)
+	if err := json.Unmarshal(nativeResponse.Payload, out); err != nil {
+		return fmt.Errorf("decode native catalog response: %w", err)
 	}
 	return nil
-}
-
-func pageQuery(request PageRequest) url.Values {
-	limit := request.Limit
-	if limit <= 0 {
-		limit = 10
-	}
-	if limit > 50 {
-		limit = 50
-	}
-	return url.Values{"limit": {strconv.Itoa(limit)}, "offset": {strconv.Itoa(max(0, request.Offset))}}
 }
 
 func max(a, b int) int {
@@ -175,7 +154,7 @@ func translateArtist(value spotifyArtist) ArtistSummary {
 
 func (a *Adapter) LikedTracks(ctx context.Context, request PageRequest) (TrackPage, error) {
 	var response spotifyPage
-	if err := a.webAPIGet(ctx, "/v1/me/tracks", pageQuery(request), &response); err != nil {
+	if err := a.nativeCatalogGet(ctx, daemon.ApiRequestDataNativeCatalog{Kind: "liked", Offset: max(0, request.Offset), Limit: request.Limit}, &response); err != nil {
 		return TrackPage{}, err
 	}
 	page := TrackPage{Total: response.Total, Offset: response.Offset, Limit: response.Limit}
@@ -191,7 +170,7 @@ func (a *Adapter) LikedTracks(ctx context.Context, request PageRequest) (TrackPa
 
 func (a *Adapter) UserPlaylists(ctx context.Context, request PageRequest) (CatalogPage[PlaylistSummary], error) {
 	var response spotifyPage
-	if err := a.webAPIGet(ctx, "/v1/me/playlists", pageQuery(request), &response); err != nil {
+	if err := a.nativeCatalogGet(ctx, daemon.ApiRequestDataNativeCatalog{Kind: "playlists", Offset: max(0, request.Offset), Limit: request.Limit}, &response); err != nil {
 		return CatalogPage[PlaylistSummary]{}, err
 	}
 	page := CatalogPage[PlaylistSummary]{Total: response.Total, Offset: response.Offset, Limit: response.Limit}
@@ -207,7 +186,7 @@ func (a *Adapter) UserPlaylists(ctx context.Context, request PageRequest) (Catal
 
 func (a *Adapter) SavedAlbums(ctx context.Context, request PageRequest) (CatalogPage[AlbumSummary], error) {
 	var response spotifyPage
-	if err := a.webAPIGet(ctx, "/v1/me/albums", pageQuery(request), &response); err != nil {
+	if err := a.nativeCatalogGet(ctx, daemon.ApiRequestDataNativeCatalog{Kind: "saved_albums", Offset: max(0, request.Offset), Limit: request.Limit}, &response); err != nil {
 		return CatalogPage[AlbumSummary]{}, err
 	}
 	page := CatalogPage[AlbumSummary]{Total: response.Total, Offset: response.Offset, Limit: response.Limit}
@@ -226,20 +205,13 @@ func (a *Adapter) Search(ctx context.Context, request SearchRequest) (SearchGrou
 	if err != nil {
 		return SearchGroups{}, err
 	}
-	limit := request.Limit
-	if limit <= 0 || limit > 10 {
-		limit = 10
-	}
-	query := url.Values{"q": {request.Query}, "type": {"album,artist,playlist"}, "limit": {strconv.Itoa(limit)}, "offset": {strconv.Itoa(max(0, request.Offset))}}
-	var response spotifySearchResponse
-	if err := a.webAPIGet(ctx, "/v1/search", query, &response); err != nil {
-		return SearchGroups{Tracks: TrackPage{Items: trackPage.Tracks, Total: trackPage.Total, Offset: trackPage.Offset, Limit: request.Limit}, NonTrackUnavailable: true}, nil
-	}
-	groups := SearchGroups{Tracks: TrackPage{Items: trackPage.Tracks, Total: trackPage.Total, Offset: trackPage.Offset, Limit: request.Limit}}
-	groups.Albums = translateAlbumPage(response.Albums)
-	groups.Artists = translateArtistPage(response.Artists)
-	groups.Playlists = translatePlaylistPage(response.Playlists)
-	return groups, nil
+	// Native search currently exposes track results. Returning the explicit
+	// unavailable marker keeps the other groups honest and, importantly, never
+	// falls back to the quota-bound public Web API.
+	return SearchGroups{
+		Tracks:              TrackPage{Items: trackPage.Tracks, Total: trackPage.Total, Offset: trackPage.Offset, Limit: request.Limit},
+		NonTrackUnavailable: true,
+	}, nil
 }
 
 func translateSearchTracks(response spotifyPage) TrackPage {
@@ -292,72 +264,58 @@ func entityID(uri string) string {
 }
 
 func (a *Adapter) Playlist(ctx context.Context, uri string, request PageRequest) (PlaylistDetail, error) {
-	var value spotifyPlaylist
-	if err := a.webAPIGet(ctx, "/v1/playlists/"+url.PathEscape(entityID(uri)), nil, &value); err != nil {
+	var response struct {
+		Playlist spotifyPlaylist `json:"playlist"`
+		Tracks   spotifyPage     `json:"tracks"`
+	}
+	if err := a.nativeCatalogGet(ctx, daemon.ApiRequestDataNativeCatalog{Kind: "playlist", URI: uri, Offset: max(0, request.Offset), Limit: request.Limit}, &response); err != nil {
 		return PlaylistDetail{}, err
 	}
-	detail := PlaylistDetail{PlaylistSummary: translatePlaylist(value)}
+	detail := PlaylistDetail{PlaylistSummary: translatePlaylist(response.Playlist)}
+	detail.Tracks = TrackPage{Total: response.Tracks.Total, Offset: response.Tracks.Offset, Limit: response.Tracks.Limit}
+	for _, raw := range response.Tracks.Items {
+		var value spotifyTrack
+		if err := json.Unmarshal(raw, &value); err == nil {
+			detail.Tracks.Items = append(detail.Tracks.Items, translateTrack(value))
+		}
+	}
 	if a.playlistContextLoader != nil {
-		tracks, err := a.playlistContextLoader(ctx, uri, request)
-		if err == nil {
+		if tracks, err := a.playlistContextLoader(ctx, uri, request); err == nil {
 			detail.Tracks = tracks
-			return detail, nil
-		}
-	}
-	if request.Limit == 0 {
-		request.Limit = 10
-	}
-	query := pageQuery(request)
-	var items spotifyPage
-	if err := a.webAPIGet(ctx, "/v1/playlists/"+url.PathEscape(entityID(uri))+"/tracks", query, &items); err != nil {
-		return detail, err
-	}
-	detail.Tracks = TrackPage{Total: items.Total, Offset: items.Offset, Limit: items.Limit}
-	for _, raw := range items.Items {
-		var item struct {
-			Track spotifyTrack `json:"track"`
-		}
-		if err := json.Unmarshal(raw, &item); err == nil {
-			detail.Tracks.Items = append(detail.Tracks.Items, translateTrack(item.Track))
 		}
 	}
 	return detail, nil
 }
 
 func (a *Adapter) Album(ctx context.Context, uri string, request PageRequest) (AlbumDetail, error) {
-	var value spotifyAlbum
-	if err := a.webAPIGet(ctx, "/v1/albums/"+url.PathEscape(entityID(uri)), nil, &value); err != nil {
+	var response struct {
+		Album  spotifyAlbum `json:"album"`
+		Tracks spotifyPage  `json:"tracks"`
+	}
+	if err := a.nativeCatalogGet(ctx, daemon.ApiRequestDataNativeCatalog{Kind: "album", URI: uri, Offset: max(0, request.Offset), Limit: request.Limit}, &response); err != nil {
 		return AlbumDetail{}, err
 	}
-	detail := AlbumDetail{AlbumSummary: translateAlbum(value)}
-	var items spotifyPage
-	if err := a.webAPIGet(ctx, "/v1/albums/"+url.PathEscape(entityID(uri))+"/tracks", pageQuery(request), &items); err != nil {
-		return detail, err
-	}
-	detail.Tracks = translateSearchTracks(items)
+	detail := AlbumDetail{AlbumSummary: translateAlbum(response.Album)}
+	detail.Tracks = translateSearchTracks(response.Tracks)
 	return detail, nil
 }
 
 func (a *Adapter) Artist(ctx context.Context, uri string, request PageRequest) (ArtistDetail, error) {
-	var value spotifyArtist
-	if err := a.webAPIGet(ctx, "/v1/artists/"+url.PathEscape(entityID(uri)), nil, &value); err != nil {
+	var response struct {
+		Artist  spotifyArtist `json:"artist"`
+		Genres  []string      `json:"genres"`
+		Popular spotifyPage   `json:"popular"`
+		Albums  spotifyPage   `json:"albums"`
+	}
+	if err := a.nativeCatalogGet(ctx, daemon.ApiRequestDataNativeCatalog{Kind: "artist", URI: uri, Offset: max(0, request.Offset), Limit: request.Limit}, &response); err != nil {
 		return ArtistDetail{}, err
 	}
-	detail := ArtistDetail{ArtistSummary: translateArtist(value), Genres: value.Genres}
-	var popular spotifyPage
-	if err := a.webAPIGet(ctx, "/v1/artists/"+url.PathEscape(entityID(uri))+"/top-tracks", url.Values{"market": {"from_token"}}, &popular); err == nil {
-		detail.Popular = translateSearchTracks(popular)
-	}
-	var albums spotifyPage
-	if err := a.webAPIGet(ctx, "/v1/artists/"+url.PathEscape(entityID(uri))+"/albums", pageQuery(request), &albums); err == nil {
-		detail.Albums = translateAlbumPage(albums).Items
-	}
-	return detail, nil
+	return ArtistDetail{ArtistSummary: translateArtist(response.Artist), Genres: response.Genres, Popular: translateSearchTracks(response.Popular), Albums: translateAlbumPage(response.Albums).Items}, nil
 }
 
 func (a *Adapter) TopArtists(ctx context.Context, request PageRequest) (CatalogPage[ArtistSummary], error) {
 	var response spotifyPage
-	if err := a.webAPIGet(ctx, "/v1/me/top/artists", pageQuery(request), &response); err != nil {
+	if err := a.nativeCatalogGet(ctx, daemon.ApiRequestDataNativeCatalog{Kind: "top_artists", Offset: max(0, request.Offset), Limit: request.Limit}, &response); err != nil {
 		return CatalogPage[ArtistSummary]{}, err
 	}
 	return translateArtistPage(response), nil
@@ -365,7 +323,7 @@ func (a *Adapter) TopArtists(ctx context.Context, request PageRequest) (CatalogP
 
 func (a *Adapter) TopTracks(ctx context.Context, request PageRequest) (TrackPage, error) {
 	var response spotifyPage
-	if err := a.webAPIGet(ctx, "/v1/me/top/tracks", pageQuery(request), &response); err != nil {
+	if err := a.nativeCatalogGet(ctx, daemon.ApiRequestDataNativeCatalog{Kind: "top_tracks", Offset: max(0, request.Offset), Limit: request.Limit}, &response); err != nil {
 		return TrackPage{}, err
 	}
 	return translateSearchTracks(response), nil
@@ -382,27 +340,6 @@ func (a *Adapter) Recommended(ctx context.Context, request PageRequest) (Recomme
 	}
 	page := RecommendedPage{Artists: artists, Tracks: tracks}
 	seenAlbums := make(map[string]bool)
-	seenPlaylists := make(map[string]bool)
-	for _, artist := range artists.Items {
-		detail, err := a.Artist(ctx, artist.URI, PageRequest{Limit: 5})
-		if err == nil {
-			for _, album := range detail.Albums {
-				if !seenAlbums[album.URI] {
-					seenAlbums[album.URI] = true
-					page.Albums = append(page.Albums, album)
-				}
-			}
-		}
-		groups, err := a.Search(ctx, SearchRequest{Query: artist.Name, Limit: 5})
-		if err == nil {
-			for _, playlist := range groups.Playlists.Items {
-				if !seenPlaylists[playlist.URI] {
-					seenPlaylists[playlist.URI] = true
-					page.Playlists = append(page.Playlists, playlist)
-				}
-			}
-		}
-	}
 	for _, track := range tracks.Items {
 		if track.AlbumURI != "" && !seenAlbums[track.AlbumURI] {
 			seenAlbums[track.AlbumURI] = true
