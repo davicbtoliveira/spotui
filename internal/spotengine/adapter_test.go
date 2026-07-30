@@ -449,6 +449,39 @@ func TestAdapterLogoutClearsSessionBeforeFreshAttempt(t *testing.T) {
 	}
 }
 
+func TestAdapterRetriesAttemptCreationAfterResetFailure(t *testing.T) {
+	events := make(chan Event, 64)
+	firstRuntime := newLifecycleRuntime()
+	adapter := newAdapter(firstRuntime, newMemoryAPIServerWithEvents(events))
+	want := errors.New("create attempt")
+	factoryCalls := 0
+	adapter.factory = func() (engineRuntime, *memoryAPIServer, error) {
+		factoryCalls++
+		if factoryCalls == 1 {
+			return nil, nil, want
+		}
+		return newLifecycleRuntime(), newMemoryAPIServerWithEvents(events), nil
+	}
+
+	if err := adapter.Start(context.Background()); err != nil {
+		t.Fatalf("start first attempt: %v", err)
+	}
+	<-firstRuntime.started
+	if err := adapter.CancelLogin(context.Background()); !errors.Is(err, want) {
+		t.Fatalf("cancel error: want %v, got %v", want, err)
+	}
+
+	if err := adapter.Start(context.Background()); err != nil {
+		t.Fatalf("retry start: %v", err)
+	}
+	if factoryCalls != 2 {
+		t.Fatalf("factory calls: want 2, got %d", factoryCalls)
+	}
+	if err := adapter.Close(context.Background()); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+}
+
 func TestAdapterPlaysTrackThroughInMemoryRequest(t *testing.T) {
 	defer goleak.VerifyNone(t, goleak.IgnoreCurrent())
 

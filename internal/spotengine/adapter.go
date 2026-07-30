@@ -71,6 +71,17 @@ func (a *Adapter) Start(ctx context.Context) error {
 	if a.cancel != nil {
 		return errors.New("playback engine already started")
 	}
+	if a.runtime == nil {
+		if a.factory == nil {
+			return errors.New("playback engine unavailable")
+		}
+		runtime, server, err := a.factory()
+		if err != nil {
+			return fmt.Errorf("create playback engine attempt: %w", err)
+		}
+		a.runtime = runtime
+		a.server = server
+	}
 
 	runCtx, cancel := context.WithCancel(ctx)
 	a.cancel = cancel
@@ -154,7 +165,7 @@ func (a *Adapter) stop(ctx context.Context, restart, clearState, final bool) err
 			if final {
 				a.closed = true
 				a.eventsOnce.Do(func() { close(a.events) })
-			} else if nextRuntime != nil {
+			} else if restart {
 				a.runtime = nextRuntime
 				a.server = nextServer
 			}
