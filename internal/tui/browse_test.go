@@ -86,3 +86,26 @@ func TestBrowseArtistDoesNotRenderEmptyAlbumRows(t *testing.T) {
 		t.Fatalf("artist view lost the valid album:\n%s", view)
 	}
 }
+
+func TestBrowseAlbumDoesNotRenderEmptyTrackRows(t *testing.T) {
+	engine := spotengine.NewFake()
+	m := browseReadyModel(engine)
+	m.browseRoute = "album:spotify:album:tranquility-base"
+	updated, _ := m.Update(msgs.CatalogLoadedMsg{
+		Route: m.browseRoute,
+		Data: spotengine.AlbumDetail{
+			AlbumSummary: spotengine.AlbumSummary{Name: "Tranquility Base Hotel & Casino", Artist: "Arctic Monkeys", ReleaseDate: "2018-05-10", TrackCount: 11},
+			Tracks: spotengine.TrackPage{Items: []spotengine.Track{
+				{URI: "spotify:track:incomplete"},
+				{URI: "spotify:track:star-treatment", Name: "Star Treatment", Artist: "Arctic Monkeys", DurationMS: 250000},
+			}},
+		},
+	})
+	m = updated.(RootModel)
+	if len(m.browseItems) != 1 || m.browseItems[0].Title != "Star Treatment" {
+		t.Fatalf("album view kept an empty track row: %#v", m.browseItems)
+	}
+	if !strings.Contains(m.View(), "Star Treatment") {
+		t.Fatalf("album view lost the valid track:\n%s", m.View())
+	}
+}

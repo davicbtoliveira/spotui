@@ -126,6 +126,9 @@ func (m *RootModel) applyCatalogMessage(msg CatalogLoadedMsg) tea.Cmd {
 		m.browseMeta = fmt.Sprintf("%s · %s · %d tracks", value.Artist, value.ReleaseDate, value.TrackCount)
 		m.browseItems = make([]browseItem, 0, len(value.Tracks.Items))
 		for _, item := range value.Tracks.Items {
+			if item.Name == "" {
+				continue
+			}
 			m.browseItems = append(m.browseItems, trackItem(item))
 		}
 	case spotengine.ArtistDetail:

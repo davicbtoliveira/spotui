@@ -181,9 +181,7 @@ func nativeTrack(ctx context.Context, client *spclient.Spclient, contextTrack *c
 }
 
 func trackValue(track *metadatapb.Track, uri, parentAlbumURI string) map[string]any {
-	if uri == "" && len(track.Gid) == 16 {
-		uri = librespot.SpotifyIdFromGid(librespot.SpotifyIdTypeTrack, track.Gid).Uri()
-	}
+	uri = trackURI(track, uri)
 	albumURI := parentAlbumURI
 	if track.Album != nil && len(track.Album.Gid) == 16 {
 		albumURI = librespot.SpotifyIdFromGid(librespot.SpotifyIdType("album"), track.Album.Gid).Uri()
@@ -205,6 +203,16 @@ func trackValue(track *metadatapb.Track, uri, parentAlbumURI string) map[string]
 		"album":         album,
 		"external_urls": map[string]any{"spotify": externalURL(uri)},
 	}
+}
+
+func trackURI(track *metadatapb.Track, fallbackURI string) string {
+	if fallbackURI != "" {
+		return fallbackURI
+	}
+	if track != nil && len(track.Gid) == 16 {
+		return librespot.SpotifyIdFromGid(librespot.SpotifyIdTypeTrack, track.Gid).Uri()
+	}
+	return fallbackURI
 }
 
 func albumValue(album *metadatapb.Album, fallbackURI string) map[string]any {
@@ -312,18 +320,44 @@ func nativeAlbum(ctx context.Context, client *spclient.Spclient, request ApiRequ
 	if err := client.ExtendedMetadataSimple(ctx, *id, extmetadatapb.ExtensionKind_ALBUM_V4, &album); err != nil {
 		return nil, fmt.Errorf("load album metadata: %w", err)
 	}
-	tracks := make([]any, 0)
+	trackRefs := make([]*metadatapb.Track, 0)
 	for _, disc := range album.Disc {
-		for _, track := range disc.Track {
-			tracks = append(tracks, trackValue(track, "", request.URI))
+		if disc == nil {
+			continue
+		}
+		trackRefs = append(trackRefs, disc.Track...)
+	}
+	start := minInt(request.Offset, len(trackRefs))
+	end := minInt(start+request.Limit, len(trackRefs))
+	tracks := make([]any, 0, end-start)
+	for _, track := range trackRefs[start:end] {
+		value, ok := nativeAlbumTrack(ctx, client, track, request.URI)
+		if ok {
+			tracks = append(tracks, value)
 		}
 	}
-	start := minInt(request.Offset, len(tracks))
-	end := minInt(start+request.Limit, len(tracks))
 	return map[string]any{
 		"album":  albumValue(&album, request.URI),
-		"tracks": nativePage{Items: tracks[start:end], Total: len(tracks), Offset: request.Offset, Limit: request.Limit}.value(),
+		"tracks": nativePage{Items: tracks, Total: len(trackRefs), Offset: request.Offset, Limit: request.Limit}.value(),
 	}, nil
+}
+
+func nativeAlbumTrack(ctx context.Context, client *spclient.Spclient, track *metadatapb.Track, parentAlbumURI string) (map[string]any, bool) {
+	uri := trackURI(track, "")
+	if uri == "" {
+		return nil, false
+	}
+	id, err := librespot.SpotifyIdFromUri(uri)
+	if err != nil {
+		return nil, false
+	}
+	var metadata metadatapb.Track
+	if err := client.ExtendedMetadataSimple(ctx, *id, extmetadatapb.ExtensionKind_TRACK_V4, &metadata); err != nil {
+		return nil, false
+	}
+	value := trackValue(&metadata, uri, parentAlbumURI)
+	name, _ := value["name"].(string)
+	return value, name != ""
 }
 
 func nativeArtist(ctx context.Context, client *spclient.Spclient, request ApiRequestDataNativeCatalog) (any, error) {
