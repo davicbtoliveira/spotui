@@ -35,3 +35,22 @@ func CmdOpenURL(openURL func(string) error, url string) tea.Cmd {
 		return msgs.BrowserOpenedMsg{}
 	}
 }
+
+func CmdResetLogin(engine spotengine.Engine, clearSession bool) tea.Cmd {
+	return func() tea.Msg {
+		var err error
+		if clearSession {
+			err = engine.Logout(context.Background())
+		} else {
+			err = engine.CancelLogin(context.Background())
+		}
+		if err != nil {
+			return msgs.LoginResetErrMsg{Err: err}
+		}
+		return msgs.LoginResetMsg{}
+	}
+}
+
+func CmdLogout(engine spotengine.Engine) tea.Cmd {
+	return CmdResetLogin(engine, true)
+}

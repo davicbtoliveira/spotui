@@ -104,6 +104,166 @@ func TestAuthorizationURLHookOpensBrowser(t *testing.T) {
 	}
 }
 
+func TestPendingAuthorizationShowsURLAndRetriesSameTransaction(t *testing.T) {
+	engine := spotengine.NewFake()
+	browser := &modelBrowser{}
+	m := NewRootModel(engine, browser.Open)
+	m.state = stateAuthenticating
+	m.width = 120
+	m.height = 24
+	const authURL = "https://accounts.spotify.com/authorize?code_challenge=same"
+
+	updated, openCmd := m.Update(msgs.EngineEventMsg{
+		Event: spotengine.Event{Type: spotengine.EventTypeAuthorizationURL, URL: authURL},
+	})
+	m = updated.(RootModel)
+	view := m.View()
+	for _, want := range []string{authURL, "r", "esc"} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("authorization view missing %q:\n%s", want, view)
+		}
+	}
+	if _, ok := openCmd().(msgs.BrowserOpenedMsg); !ok {
+		t.Fatal("initial browser command did not report success")
+	}
+
+	updated, retryCmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("r")})
+	m = updated.(RootModel)
+	if retryCmd == nil {
+		t.Fatal("retry returned no browser command")
+	}
+	if _, ok := retryCmd().(msgs.BrowserOpenedMsg); !ok {
+		t.Fatal("retry browser command did not report success")
+	}
+	if len(browser.urls) != 2 || browser.urls[0] != authURL || browser.urls[1] != authURL {
+		t.Fatalf("browser URLs: %v", browser.urls)
+	}
+	for _, call := range engine.Calls() {
+		if call.Operation == spotengine.OperationStart {
+			t.Fatalf("retry restarted engine transaction: %#v", engine.Calls())
+		}
+	}
+}
+
+func TestEscapeCancelsPendingLoginAndReturnsLoggedOut(t *testing.T) {
+	engine := spotengine.NewFake()
+	m := NewRootModel(engine, (&modelBrowser{}).Open)
+	m.state = stateAuthenticating
+
+	updated, cancelCmd := m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	m = updated.(RootModel)
+	if cancelCmd == nil {
+		t.Fatal("escape returned no cancellation command")
+	}
+	updated, _ = m.Update(cancelCmd())
+	m = updated.(RootModel)
+
+	if m.state != stateLoggedOut {
+		t.Fatalf("state: want logged out, got %v", m.state)
+	}
+	calls := engine.Calls()
+	if len(calls) != 1 || calls[0].Operation != spotengine.OperationCancelLogin {
+		t.Fatalf("engine calls: %#v", calls)
+	}
+}
+
+func TestBrowserFailureKeepsLoginRetryable(t *testing.T) {
+	engine := spotengine.NewFake()
+	m := NewRootModel(engine, func(string) error { return errors.New("no browser") })
+	m.state = stateAuthenticating
+	m.width = 100
+	m.height = 24
+	m.authURL = "https://accounts.spotify.com/authorize?test"
+
+	updated, waitCmd := m.Update(msgs.BrowserOpenErrMsg{Err: errors.New("no browser")})
+	m = updated.(RootModel)
+
+	if m.state != stateAuthenticating {
+		t.Fatalf("state: want authenticating, got %v", m.state)
+	}
+	if waitCmd == nil {
+		t.Fatal("browser failure stopped listening for callback")
+	}
+	view := m.View()
+	for _, want := range []string{"no browser", m.authURL, "r"} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("browser failure view missing %q:\n%s", want, view)
+		}
+	}
+}
+
+func TestLoginFailureReturnsRetryableLoggedOutScreen(t *testing.T) {
+	engine := spotengine.NewFake()
+	m := NewRootModel(engine, (&modelBrowser{}).Open)
+	m.state = stateAuthenticating
+	m.width = 80
+	m.height = 24
+
+	updated, resetCmd := m.Update(msgs.EngineEventMsg{
+		Event: spotengine.Event{Type: spotengine.EventTypeError, Err: errors.New("access denied")},
+	})
+	m = updated.(RootModel)
+	if resetCmd == nil {
+		t.Fatal("login failure returned no reset command")
+	}
+	updated, quitCmd := m.Update(resetCmd())
+	m = updated.(RootModel)
+
+	if quitCmd != nil {
+		t.Fatal("login failure quit the application")
+	}
+	if m.state != stateLoggedOut {
+		t.Fatalf("state: want logged out, got %v", m.state)
+	}
+	view := m.View()
+	for _, want := range []string{"access denied", "Enter"} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("failure view missing %q:\n%s", want, view)
+		}
+	}
+}
+
+func TestFreeAccountBlocksPlayerUntilLogout(t *testing.T) {
+	engine := spotengine.NewFake()
+	engine.SetHasSession(true)
+	m := NewRootModel(engine, (&modelBrowser{}).Open)
+	m.width = 80
+	m.height = 24
+
+	updated, cmd := m.Update(msgs.EngineEventMsg{
+		Event: spotengine.Event{Type: spotengine.EventTypeAccountProduct, Product: "free"},
+	})
+	m = updated.(RootModel)
+	if cmd != nil {
+		t.Fatal("unsupported account kept entering player flow")
+	}
+	if m.state != stateUnsupported {
+		t.Fatalf("state: want unsupported, got %v", m.state)
+	}
+	view := m.View()
+	for _, want := range []string{"Free", "Premium", "L", "q"} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("unsupported view missing %q:\n%s", want, view)
+		}
+	}
+
+	updated, blockedCmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = updated.(RootModel)
+	if blockedCmd != nil || m.state != stateUnsupported {
+		t.Fatal("unsupported account accepted player input")
+	}
+	updated, logoutCmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("L")})
+	m = updated.(RootModel)
+	if logoutCmd == nil {
+		t.Fatal("L returned no logout command")
+	}
+	updated, _ = m.Update(logoutCmd())
+	m = updated.(RootModel)
+	if m.state != stateLoggedOut || engine.HasSession() {
+		t.Fatalf("logout state=%v hasSession=%v", m.state, engine.HasSession())
+	}
+}
+
 func TestSuccessfulPremiumLoginReachesReadyState(t *testing.T) {
 	engine := spotengine.NewFake()
 	m := NewRootModel(engine, (&modelBrowser{}).Open)

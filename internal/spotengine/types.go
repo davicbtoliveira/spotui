@@ -15,6 +15,7 @@ const (
 	EventTypeAuthorizationURL EventType = "authorization_url"
 	EventTypeError            EventType = "error"
 	EventTypeAccountProduct   EventType = "account_product"
+	EventTypeSessionEnded     EventType = "session_ended"
 )
 
 type Track struct {

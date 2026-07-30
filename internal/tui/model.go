@@ -20,7 +20,9 @@ type appState int
 const (
 	stateLoggedOut appState = iota
 	stateAuthenticating
+	stateCancelling
 	stateLoading
+	stateUnsupported
 	stateReady
 )
 
@@ -30,6 +32,9 @@ type RootModel struct {
 	height  int
 	engine  spotengine.Engine
 	openURL func(string) error
+	authURL string
+
+	waitingEngine bool
 
 	client *spotify.Client
 
@@ -110,22 +115,91 @@ func (m RootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case AuthErrMsg:
 		m.statusMsg = "Auth failed: " + msg.Err.Error()
 		m.statusIsErr = true
-		return m, tea.Quit
+		m.state = stateLoggedOut
+		return m, nil
 
 	case EngineStartedMsg:
-		return m, commands.CmdWaitEngineEvent(m.engine)
+		return m, m.waitEngineEvent()
+
+	case EngineStartErrMsg:
+		m.state = stateLoggedOut
+		m.statusMsg = "Login failed: " + msg.Err.Error()
+		m.statusIsErr = true
+		return m, nil
 
 	case EngineEventMsg:
+		m.waitingEngine = false
 		switch msg.Event.Type {
 		case spotengine.EventTypeAuthorizationURL:
+			if m.state != stateAuthenticating {
+				return m, nil
+			}
+			m.authURL = msg.Event.URL
+			m.statusMsg = ""
+			m.statusIsErr = false
 			return m, commands.CmdOpenURL(m.openURL, msg.Event.URL)
+		case spotengine.EventTypeError:
+			if m.state == stateAuthenticating || m.state == stateLoading {
+				clearSession := m.state == stateLoading && m.engine.HasSession()
+				m.state = stateCancelling
+				m.statusMsg = "Login failed: " + msg.Event.Err.Error()
+				m.statusIsErr = true
+				return m, commands.CmdResetLogin(m.engine, clearSession)
+			}
+			m.statusMsg = "Playback engine: " + msg.Event.Err.Error()
+			m.statusIsErr = true
+		case spotengine.EventTypeAccountProduct:
+			if strings.EqualFold(msg.Event.Product, "free") {
+				m.state = stateUnsupported
+				return m, nil
+			}
 		case spotengine.EventTypeReady:
-			m.state = stateReady
+			if m.state == stateAuthenticating || m.state == stateLoading {
+				m.state = stateReady
+			}
+		case spotengine.EventTypeSessionEnded:
+			if m.state == stateLoggedOut || m.state == stateCancelling || m.state == stateUnsupported {
+				return m, nil
+			}
 		}
-		return m, commands.CmdWaitEngineEvent(m.engine)
+		return m, m.waitEngineEvent()
 
 	case BrowserOpenedMsg:
-		return m, commands.CmdWaitEngineEvent(m.engine)
+		if m.state != stateAuthenticating {
+			return m, nil
+		}
+		m.statusMsg = ""
+		m.statusIsErr = false
+		return m, m.waitEngineEvent()
+
+	case BrowserOpenErrMsg:
+		if m.state != stateAuthenticating {
+			return m, nil
+		}
+		m.statusMsg = "Could not open browser: " + msg.Err.Error()
+		m.statusIsErr = true
+		return m, m.waitEngineEvent()
+
+	case EngineEventsClosedMsg:
+		m.waitingEngine = false
+		if m.state != stateLoggedOut {
+			m.state = stateLoggedOut
+			m.statusMsg = "Login failed: playback engine closed"
+			m.statusIsErr = true
+		}
+		return m, nil
+
+	case LoginResetMsg:
+		m.state = stateLoggedOut
+		m.authURL = ""
+		return m, nil
+
+	case LoginResetErrMsg:
+		m.state = stateLoggedOut
+		m.authURL = ""
+		m.statusMsg = "Could not reset login: " + msg.Err.Error()
+		m.statusIsErr = true
+		return m, nil
 
 	case UserLoadedMsg:
 		if msg.User.DisplayName != "" {
@@ -228,6 +302,14 @@ func (m *RootModel) checkReady() {
 	}
 }
 
+func (m *RootModel) waitEngineEvent() tea.Cmd {
+	if m.waitingEngine {
+		return nil
+	}
+	m.waitingEngine = true
+	return commands.CmdWaitEngineEvent(m.engine)
+}
+
 func (m RootModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.showHelp {
 		m.showHelp = false
@@ -236,6 +318,34 @@ func (m RootModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	if msg.String() == KeyQuit {
 		return m, tea.Quit
+	}
+
+	if m.state == stateUnsupported {
+		switch msg.String() {
+		case KeyQuitAlt:
+			return m, tea.Quit
+		case KeyLogout:
+			return m, commands.CmdLogout(m.engine)
+		default:
+			return m, nil
+		}
+	}
+
+	if m.state == stateAuthenticating {
+		switch {
+		case msg.Type == tea.KeyEsc:
+			m.state = stateCancelling
+			return m, commands.CmdResetLogin(m.engine, false)
+		case msg.String() == KeyRetry && m.authURL != "":
+			return m, commands.CmdOpenURL(m.openURL, m.authURL)
+		}
+	}
+
+	if m.state == stateCancelling {
+		if msg.String() == KeyQuitAlt {
+			return m, tea.Quit
+		}
+		return m, nil
 	}
 
 	if m.state == stateReady && m.searchInputActive {
@@ -269,6 +379,9 @@ func (m RootModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	if m.state == stateLoggedOut && msg.Type == tea.KeyEnter {
 		m.state = stateAuthenticating
+		m.statusMsg = ""
+		m.statusIsErr = false
+		m.authURL = ""
 		return m, commands.CmdStartEngine(m.engine)
 	}
 
@@ -379,19 +492,45 @@ func (m RootModel) View() string {
 
 	switch m.state {
 	case stateLoggedOut:
+		rows := []string{
+			theme.TopBarTitle.Render("SpotUI"),
+			theme.SubtextStyle.Render("Spotify Premium is required"),
+			theme.SubtextStyle.Render("Press Enter to Log in with Spotify"),
+			theme.SubtextStyle.Render("Press q to quit"),
+		}
+		if m.statusMsg != "" {
+			rows = append(rows, theme.ErrorStyle.Render(m.statusMsg))
+		}
 		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center,
-			lipgloss.JoinVertical(lipgloss.Center,
-				theme.TopBarTitle.Render("SpotUI"),
-				theme.SubtextStyle.Render("Spotify Premium is required"),
-				theme.SubtextStyle.Render("Press Enter to Log in with Spotify"),
-				theme.SubtextStyle.Render("Press q to quit"),
-			))
+			lipgloss.JoinVertical(lipgloss.Center, rows...))
 	case stateAuthenticating:
+		rows := []string{theme.SubtextStyle.Render("Waiting for Spotify authorization...")}
+		if m.authURL != "" {
+			rows = append(rows,
+				theme.SubtextStyle.Render("If the browser did not open, use this URL:"),
+				m.authURL,
+				theme.SubtextStyle.Render("Press r to retry browser • esc to cancel"),
+			)
+		}
+		if m.statusMsg != "" {
+			rows = append(rows, theme.ErrorStyle.Render(m.statusMsg))
+		}
 		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center,
-			theme.SubtextStyle.Render("Waiting for Spotify authorization..."))
+			lipgloss.JoinVertical(lipgloss.Center, rows...))
+	case stateCancelling:
+		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center,
+			theme.SubtextStyle.Render("Closing Spotify login..."))
 	case stateLoading:
 		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center,
 			theme.SubtextStyle.Render("Loading your library..."))
+	case stateUnsupported:
+		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center,
+			lipgloss.JoinVertical(lipgloss.Center,
+				theme.TopBarTitle.Render("Spotify Free is not supported"),
+				theme.SubtextStyle.Render("SpotUI requires Spotify Premium for playback"),
+				theme.SubtextStyle.Render("Press L to Log out"),
+				theme.SubtextStyle.Render("Press q to quit"),
+			))
 	case stateReady:
 		return m.renderMain()
 	}

@@ -69,3 +69,9 @@ type BrowserOpenedMsg struct{}
 type BrowserOpenErrMsg struct {
 	Err error
 }
+
+type LoginResetMsg struct{}
+
+type LoginResetErrMsg struct {
+	Err error
+}

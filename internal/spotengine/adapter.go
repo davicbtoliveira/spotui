@@ -75,6 +75,7 @@ func (a *Adapter) Start(ctx context.Context) error {
 	runCtx, cancel := context.WithCancel(ctx)
 	a.cancel = cancel
 	a.runDone = make(chan error, 1)
+	runDone := a.runDone
 	runtime := a.runtime
 	server := a.server
 	go func() {
@@ -82,7 +83,7 @@ func (a *Adapter) Start(ctx context.Context) error {
 		if err != nil && !errors.Is(err, context.Canceled) {
 			server.emit(Event{Type: EventTypeError, Err: err})
 		}
-		a.runDone <- err
+		runDone <- err
 	}()
 	return nil
 }
@@ -132,7 +133,9 @@ func (a *Adapter) stop(ctx context.Context, restart, clearState, final bool) err
 			if clearState && a.clearState != nil {
 				stopErr = errors.Join(stopErr, a.clearState())
 			}
-
+			if restart {
+				drainEvents(a.events)
+			}
 			var nextRuntime engineRuntime
 			var nextServer *memoryAPIServer
 			if restart && a.factory != nil {
@@ -155,6 +158,9 @@ func (a *Adapter) stop(ctx context.Context, restart, clearState, final bool) err
 				a.runtime = nextRuntime
 				a.server = nextServer
 			}
+			if restart {
+				a.events <- Event{Type: EventTypeSessionEnded}
+			}
 			close(done)
 			a.mu.Unlock()
 		}()
@@ -170,6 +176,16 @@ func (a *Adapter) stop(ctx context.Context, restart, clearState, final bool) err
 		return err
 	case <-ctx.Done():
 		return ctx.Err()
+	}
+}
+
+func drainEvents(events <-chan Event) {
+	for {
+		select {
+		case <-events:
+		default:
+			return
+		}
 	}
 }
 

@@ -385,11 +385,15 @@ func TestAdapterCancelsLoginAndStartsFreshAttempt(t *testing.T) {
 		t.Fatal("first runtime was not closed")
 	}
 	select {
-	case _, ok := <-adapter.Events():
+	case event, ok := <-adapter.Events():
 		if !ok {
 			t.Fatal("cancel closed the stable events channel")
 		}
-	default:
+		if event.Type != EventTypeSessionEnded {
+			t.Fatalf("cancel event: want session ended, got %#v", event)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("cancel did not release the pending event listener")
 	}
 
 	if err := adapter.Start(context.Background()); err != nil {
@@ -417,6 +421,7 @@ func TestAdapterLogoutClearsSessionBeforeFreshAttempt(t *testing.T) {
 	adapter := newAdapter(runtime, server)
 	adapter.factory = factory
 	adapter.hasSession = true
+	server.emit(Event{Type: EventTypeReady})
 	cleared := false
 	adapter.clearState = func() error {
 		cleared = true
@@ -431,6 +436,9 @@ func TestAdapterLogoutClearsSessionBeforeFreshAttempt(t *testing.T) {
 	}
 	if adapter.HasSession() {
 		t.Fatal("logout retained session state")
+	}
+	if event := <-adapter.Events(); event.Type != EventTypeSessionEnded {
+		t.Fatalf("logout retained stale event: %#v", event)
 	}
 
 	if err := adapter.Start(context.Background()); err != nil {

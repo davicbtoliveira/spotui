@@ -23,3 +23,5 @@ type EngineEventMsg = msgs.EngineEventMsg
 type EngineEventsClosedMsg = msgs.EngineEventsClosedMsg
 type BrowserOpenedMsg = msgs.BrowserOpenedMsg
 type BrowserOpenErrMsg = msgs.BrowserOpenErrMsg
+type LoginResetMsg = msgs.LoginResetMsg
+type LoginResetErrMsg = msgs.LoginResetErrMsg
