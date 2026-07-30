@@ -2,6 +2,8 @@ package tui
 
 import (
 	"errors"
+	"fmt"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -162,6 +164,34 @@ func TestBrowserFailureKeepsLoginRetryable(t *testing.T) {
 	if m.state != stateAuthenticating || waitCmd == nil ||
 		!strings.Contains(m.View(), "no browser") || !strings.Contains(m.View(), m.authURL) {
 		t.Fatalf("browser recovery:\n%s", m.View())
+	}
+}
+
+func TestBlockedSpotifyURLShowsFriendlyLoginError(t *testing.T) {
+	engine := spotengine.NewFake()
+	blocked := fmt.Errorf("failed getting endpoints from resolver: %w", &url.Error{
+		Op:  "Get",
+		URL: "https://apresolve.spotify.com/",
+		Err: errors.New("access denied"),
+	})
+	engine.SetError(spotengine.OperationCancelLogin, blocked)
+	m := NewRootModel(engine, func(string) error { return nil })
+	m.state = stateAuthenticating
+	m.width, m.height = 100, 24
+
+	updated, resetCmd := m.Update(msgs.EngineEventMsg{
+		Event: spotengine.Event{Type: spotengine.EventTypeError, Err: blocked},
+	})
+	m = updated.(RootModel)
+	updated, _ = m.Update(resetCmd())
+	m = updated.(RootModel)
+
+	const want = "Could not access Spotify. Check your connection and try again."
+	if !strings.Contains(m.View(), want) {
+		t.Fatalf("friendly connection error missing:\n%s", m.View())
+	}
+	if strings.Contains(m.View(), "apresolve") || strings.Contains(m.View(), "Could not reset login") {
+		t.Fatalf("technical login error leaked:\n%s", m.View())
 	}
 }
 

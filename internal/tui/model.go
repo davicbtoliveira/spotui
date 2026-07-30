@@ -1,7 +1,9 @@
 package tui
 
 import (
+	"errors"
 	"math/rand/v2"
+	"net/url"
 	"strings"
 	"time"
 
@@ -13,6 +15,8 @@ import (
 	"github.com/dcbto/spotui/internal/tui/commands"
 	"github.com/dcbto/spotui/internal/tui/views"
 )
+
+const spotifyAccessErrorMessage = "Could not access Spotify. Check your connection and try again."
 
 type appState int
 
@@ -150,7 +154,11 @@ func (m RootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.state == stateAuthenticating || m.state == stateLoading {
 				clearSession := m.state == stateLoading && m.engine.HasSession()
 				m.state = stateCancelling
-				m.statusMsg = "Login failed: " + msg.Event.Err.Error()
+				if isSpotifyAccessError(msg.Event.Err) {
+					m.statusMsg = spotifyAccessErrorMessage
+				} else {
+					m.statusMsg = "Login failed: " + msg.Event.Err.Error()
+				}
 				m.statusIsErr = true
 				return m, commands.CmdResetLogin(m.engine, clearSession)
 			}
@@ -273,7 +281,11 @@ func (m RootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case LoginResetErrMsg:
 		m.state = stateLoggedOut
 		m.authURL = ""
-		m.statusMsg = "Could not reset login: " + msg.Err.Error()
+		if isSpotifyAccessError(msg.Err) {
+			m.statusMsg = spotifyAccessErrorMessage
+		} else {
+			m.statusMsg = "Could not reset login: " + msg.Err.Error()
+		}
 		m.statusIsErr = true
 		return m, nil
 
@@ -352,6 +364,19 @@ func (m RootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 
 	return m, nil
+}
+
+func isSpotifyAccessError(err error) bool {
+	var requestErr *url.Error
+	if !errors.As(err, &requestErr) {
+		return false
+	}
+	requestURL, parseErr := url.Parse(requestErr.URL)
+	if parseErr != nil {
+		return false
+	}
+	host := strings.ToLower(requestURL.Hostname())
+	return host == "spotify.com" || strings.HasSuffix(host, ".spotify.com")
 }
 
 func (m *RootModel) clearAccount() {
