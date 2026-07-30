@@ -34,6 +34,14 @@ Track Search will initially use go-librespot's authenticated Web API passthrough
 inside this adapter. Playback will use go-librespot context and player requests,
 not Spotify Web API playback endpoints.
 
+## Amendment: Native Track Search
+
+The initial Web API passthrough returned HTTP 429 because its application quota
+is shared. Track Search now resolves a `spotify:search:` context, follows its
+native pages, and loads TRACK_V4 metadata through go-librespot. This keeps
+search on the same authenticated protocol as playback and removes the public
+Web API dependency from the SpotUI search path.
+
 Bubble Tea commands will call only SpotUI interfaces. Player events will enter
 the TUI as messages and remain the source of truth.
 

@@ -2,11 +2,8 @@ package spotengine
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"net/url"
-	"strconv"
 	"strings"
 	"sync"
 
@@ -266,61 +263,32 @@ func (a *Adapter) Play(ctx context.Context, uri string) error {
 }
 
 func (a *Adapter) SearchTracks(ctx context.Context, request SearchRequest) (SearchPage, error) {
-	response, err := a.server.request(ctx, daemon.ApiRequestTypeWebApi, daemon.ApiRequestDataWebApi{
-		Method: "GET",
-		Path:   "/v1/search",
-		Query: url.Values{
-			"q":      {request.Query},
-			"type":   {"track"},
-			"offset": {strconv.Itoa(request.Offset)},
-			"limit":  {strconv.Itoa(request.Limit)},
-		},
+	response, err := a.server.request(ctx, daemon.ApiRequestTypeSearch, daemon.ApiRequestDataSearch{
+		Query:  request.Query,
+		Offset: request.Offset,
+		Limit:  request.Limit,
 	})
 	if err != nil {
 		return SearchPage{}, err
 	}
 
-	var payload struct {
-		Tracks struct {
-			Items []struct {
-				URI        string `json:"uri"`
-				Name       string `json:"name"`
-				DurationMS int    `json:"duration_ms"`
-				Artists    []struct {
-					Name string `json:"name"`
-				} `json:"artists"`
-				Album struct {
-					Name string `json:"name"`
-				} `json:"album"`
-			} `json:"items"`
-			Total  int `json:"total"`
-			Offset int `json:"offset"`
-		} `json:"tracks"`
-	}
-	data, err := json.Marshal(response)
-	if err != nil {
-		return SearchPage{}, fmt.Errorf("encode track search response: %w", err)
-	}
-	if err := json.Unmarshal(data, &payload); err != nil {
-		return SearchPage{}, fmt.Errorf("decode track search response: %w", err)
+	searchResponse, ok := response.(daemon.ApiResponseSearch)
+	if !ok {
+		return SearchPage{}, fmt.Errorf("decode track search response: unexpected %T", response)
 	}
 
 	page := SearchPage{
-		Tracks: make([]Track, len(payload.Tracks.Items)),
-		Total:  payload.Tracks.Total,
-		Offset: payload.Tracks.Offset,
+		Tracks: make([]Track, len(searchResponse.Tracks)),
+		Total:  searchResponse.Total,
+		Offset: searchResponse.Offset,
 	}
-	for i, item := range payload.Tracks.Items {
-		artists := make([]string, len(item.Artists))
-		for j, artist := range item.Artists {
-			artists[j] = artist.Name
-		}
+	for i, item := range searchResponse.Tracks {
 		page.Tracks[i] = Track{
-			URI:        item.URI,
+			URI:        item.Uri,
 			Name:       item.Name,
-			Artist:     strings.Join(artists, ", "),
-			Album:      item.Album.Name,
-			DurationMS: item.DurationMS,
+			Artist:     strings.Join(item.ArtistNames, ", "),
+			Album:      item.AlbumName,
+			DurationMS: item.Duration,
 		}
 	}
 	return page, nil

@@ -86,22 +86,18 @@ func TestAdapterTranslatesTrackSearchResponse(t *testing.T) {
 		server:   server,
 		requests: make(chan daemon.ApiRequest, 1),
 		reply: func(daemon.ApiRequest) (any, error) {
-			return map[string]any{
-				"tracks": map[string]any{
-					"items": []any{
-						map[string]any{
-							"uri":         "spotify:track:hello",
-							"name":        "Hello",
-							"duration_ms": float64(295000),
-							"artists": []any{
-								map[string]any{"name": "Adele"},
-							},
-							"album": map[string]any{"name": "25"},
-						},
+			return daemon.ApiResponseSearch{
+				Tracks: []daemon.ApiResponseSearchTrack{
+					{
+						Uri:         "spotify:track:hello",
+						Name:        "Hello",
+						ArtistNames: []string{"Adele"},
+						AlbumName:   "25",
+						Duration:    295000,
 					},
-					"total":  float64(1),
-					"offset": float64(20),
 				},
+				Total:  42,
+				Offset: 1,
 			}, nil
 		},
 	}
@@ -109,11 +105,16 @@ func TestAdapterTranslatesTrackSearchResponse(t *testing.T) {
 	if err := adapter.Start(context.Background()); err != nil {
 		t.Fatalf("start: %v", err)
 	}
+	defer func() {
+		if err := adapter.Close(context.Background()); err != nil {
+			t.Errorf("close: %v", err)
+		}
+	}()
 
 	page, err := adapter.SearchTracks(context.Background(), SearchRequest{
 		Query:  "hello",
-		Offset: 20,
-		Limit:  20,
+		Offset: 1,
+		Limit:  1,
 	})
 	if err != nil {
 		t.Fatalf("search tracks: %v", err)
@@ -125,23 +126,17 @@ func TestAdapterTranslatesTrackSearchResponse(t *testing.T) {
 		got.Artist != "Adele" || got.Album != "25" || got.DurationMS != 295000 {
 		t.Fatalf("track: %#v", got)
 	}
-	if page.Total != 1 || page.Offset != 20 {
+	if page.Total != 42 || page.Offset != 1 {
 		t.Fatalf("page: %#v", page)
 	}
 
 	request := <-runtime.requests
-	data, ok := request.Data.(daemon.ApiRequestDataWebApi)
-	if request.Type != daemon.ApiRequestTypeWebApi || !ok {
+	data, ok := request.Data.(daemon.ApiRequestDataSearch)
+	if request.Type != daemon.ApiRequestTypeSearch || !ok {
 		t.Fatalf("request: type %q, data %T", request.Type, request.Data)
 	}
-	if data.Method != "GET" || data.Path != "/v1/search" ||
-		data.Query.Get("q") != "hello" || data.Query.Get("type") != "track" ||
-		data.Query.Get("offset") != "20" || data.Query.Get("limit") != "20" {
+	if data.Query != "hello" || data.Offset != 1 || data.Limit != 1 {
 		t.Fatalf("request data: %#v", data)
-	}
-
-	if err := adapter.Close(context.Background()); err != nil {
-		t.Fatalf("close: %v", err)
 	}
 }
 
