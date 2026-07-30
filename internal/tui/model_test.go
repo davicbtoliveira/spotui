@@ -344,6 +344,128 @@ func newReadyModel() RootModel {
 	return m
 }
 
+func TestReadyEngineSearchesAndRendersStableResults(t *testing.T) {
+	engine := spotengine.NewFake()
+	engine.SetSearchResult(spotengine.SearchPage{
+		Tracks: []spotengine.Track{{
+			URI:        "spotify:track:hello",
+			Name:       "Hello",
+			Artist:     "Adele",
+			DurationMS: 295000,
+		}},
+		Total: 1,
+	}, nil)
+	m := NewRootModel(engine, func(string) error { return nil })
+	m.state = stateReady
+	m.library.SetActiveTab(library.TabSearch)
+	m.width = 80
+	m.height = 24
+
+	m = sendKey(m, "/")
+	for _, key := range []string{"h", "e", "l", "l", "o"} {
+		m = sendKey(m, key)
+	}
+	updated, searchCmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = updated.(RootModel)
+	if searchCmd == nil {
+		t.Fatal("search returned no command")
+	}
+	loaded := searchCmd()
+	if _, ok := loaded.(msgs.EngineTrackSearchLoadedMsg); !ok {
+		t.Fatalf("message: want EngineTrackSearchLoadedMsg, got %T", loaded)
+	}
+	updated, _ = m.Update(loaded)
+	m = updated.(RootModel)
+
+	view := m.View()
+	for _, want := range []string{"Hello", "Adele", "04:55"} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("search view missing %q:\n%s", want, view)
+		}
+	}
+	calls := engine.Calls()
+	if len(calls) != 1 || calls[0].Operation != spotengine.OperationSearchTracks {
+		t.Fatalf("engine calls: %#v", calls)
+	}
+}
+
+func TestEnterOnEngineSearchResultStartsLocalPlayback(t *testing.T) {
+	engine := spotengine.NewFake()
+	m := NewRootModel(engine, func(string) error { return nil })
+	m.state = stateReady
+	m.library.SetActiveTab(library.TabSearch)
+	updated, _ := m.Update(msgs.EngineTrackSearchLoadedMsg{
+		Tracks: []spotengine.Track{{
+			URI:  "spotify:track:hello",
+			Name: "Hello",
+		}},
+		Total: 1,
+	})
+	m = updated.(RootModel)
+
+	_, playCmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if playCmd == nil {
+		t.Fatal("Enter returned no playback command")
+	}
+	if msg := playCmd(); msg != nil {
+		if errMsg, ok := msg.(msgs.ErrMsg); ok {
+			t.Fatalf("playback error: %v", errMsg.Err)
+		}
+	}
+
+	calls := engine.Calls()
+	if len(calls) != 1 || calls[0].Operation != spotengine.OperationPlay ||
+		calls[0].URI != "spotify:track:hello" {
+		t.Fatalf("engine calls: %#v", calls)
+	}
+}
+
+func TestPlaybackEngineEventsDriveVisiblePlayerState(t *testing.T) {
+	m := NewRootModel(spotengine.NewFake(), func(string) error { return nil })
+	m.state = stateReady
+	m.width = 80
+	m.height = 24
+
+	events := []spotengine.Event{
+		{
+			Type:       spotengine.EventTypeMetadata,
+			Track:      &spotengine.Track{Name: "Hello", Artist: "Adele", DurationMS: 295000},
+			PositionMS: 12000,
+			DurationMS: 295000,
+		},
+		{Type: spotengine.EventTypeBuffering},
+	}
+	for _, event := range events {
+		updated, _ := m.Update(msgs.EngineEventMsg{Event: event})
+		m = updated.(RootModel)
+	}
+	view := m.View()
+	for _, want := range []string{"Hello", "Adele", "Buffering", "00:12/04:55"} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("buffering player missing %q:\n%s", want, view)
+		}
+	}
+
+	updated, _ := m.Update(msgs.EngineEventMsg{Event: spotengine.Event{Type: spotengine.EventTypePlaying}})
+	m = updated.(RootModel)
+	updated, _ = m.Update(ProgressTickMsg{})
+	m = updated.(RootModel)
+	view = m.View()
+	for _, want := range []string{"Playing", "00:13/04:55"} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("playing player missing %q:\n%s", want, view)
+		}
+	}
+
+	updated, _ = m.Update(msgs.EngineEventMsg{
+		Event: spotengine.Event{Type: spotengine.EventTypeError, Err: errors.New("check default audio output")},
+	})
+	m = updated.(RootModel)
+	if view = m.View(); !strings.Contains(view, "check default audio output") {
+		t.Fatalf("playback failure not actionable:\n%s", view)
+	}
+}
+
 func sendKey(m RootModel, key string) RootModel {
 	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(key)})
 	return updated.(RootModel)

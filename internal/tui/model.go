@@ -47,6 +47,10 @@ type RootModel struct {
 	nowPlaying      *spotify.PlayerState
 	shuffleOn       bool
 	localProgressMs int
+	engineTrack     *spotengine.Track
+	enginePlaying   bool
+	engineBuffering bool
+	engineActive    bool
 
 	statusMsg   string
 	statusIsErr bool
@@ -156,7 +160,35 @@ func (m RootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case spotengine.EventTypeReady:
 			if m.state == stateAuthenticating || m.state == stateLoading {
 				m.state = stateReady
+				m.library.SetActiveTab(library.TabSearch)
 			}
+		case spotengine.EventTypeMetadata:
+			if msg.Event.Track != nil {
+				track := *msg.Event.Track
+				if track.DurationMS == 0 {
+					track.DurationMS = msg.Event.DurationMS
+				}
+				m.engineTrack = &track
+			}
+			m.localProgressMs = msg.Event.PositionMS
+		case spotengine.EventTypeSeek:
+			m.localProgressMs = msg.Event.PositionMS
+		case spotengine.EventTypeBuffering:
+			m.engineBuffering = true
+			m.enginePlaying = false
+		case spotengine.EventTypePlaying:
+			m.engineBuffering = false
+			m.enginePlaying = true
+		case spotengine.EventTypePaused:
+			m.engineBuffering = false
+			m.enginePlaying = false
+		case spotengine.EventTypeStopped:
+			m.engineBuffering = false
+			m.enginePlaying = false
+		case spotengine.EventTypeActive:
+			m.engineActive = true
+		case spotengine.EventTypeInactive:
+			m.engineActive = false
 		case spotengine.EventTypeSessionEnded:
 			if m.state == stateLoggedOut || m.state == stateCancelling || m.state == stateUnsupported {
 				return m, nil
@@ -239,6 +271,23 @@ func (m RootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.searchTotal = msg.Total
 		return m, nil
 
+	case EngineTrackSearchLoadedMsg:
+		translated := make([]library.TrackEntry, len(msg.Tracks))
+		for i, track := range msg.Tracks {
+			translated[i] = library.TrackEntry{
+				Name:     track.Name,
+				Artist:   track.Artist,
+				Duration: track.DurationMS,
+				URI:      track.URI,
+			}
+		}
+		m.library.SetSearchResults(translated)
+		m.searchLoading = false
+		m.searchCompleted = true
+		m.searchOffset = msg.Offset
+		m.searchTotal = msg.Total
+		return m, nil
+
 	case ArtistsLoadedMsg:
 		translated := make([]library.ArtistEntry, len(msg.Artists))
 		for i, a := range msg.Artists {
@@ -258,6 +307,12 @@ func (m RootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case ProgressTickMsg:
+		if m.engineTrack != nil && m.enginePlaying {
+			m.localProgressMs += 1000
+			if m.localProgressMs > m.engineTrack.DurationMS {
+				m.localProgressMs = m.engineTrack.DurationMS
+			}
+		}
 		if m.nowPlaying != nil && m.nowPlaying.Playing && m.nowPlaying.Item != nil {
 			dur := int(m.nowPlaying.Item.Duration)
 			m.localProgressMs += 1000
@@ -373,7 +428,7 @@ func (m RootModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.searchLoading = true
 			m.searchCompleted = false
 			m.searchOffset = 0
-			return m, commands.CmdSearchTracks(m.trackSearcher, m.searchQuery, 0)
+			return m, m.searchTracks(0)
 		}
 	}
 
@@ -393,7 +448,7 @@ func (m RootModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
-	if m.state != stateReady || m.client == nil {
+	if m.state != stateReady {
 		return m, nil
 	}
 
@@ -438,7 +493,7 @@ func (m RootModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			if nextOffset < m.searchTotal {
 				m.searchLoading = true
 				m.searchOffset = nextOffset
-				return m, commands.CmdSearchTracks(m.trackSearcher, m.searchQuery, nextOffset)
+				return m, m.searchTracks(nextOffset)
 			}
 		}
 		return m, nil
@@ -448,7 +503,7 @@ func (m RootModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			if prevOffset >= 0 {
 				m.searchLoading = true
 				m.searchOffset = prevOffset
-				return m, commands.CmdSearchTracks(m.trackSearcher, m.searchQuery, prevOffset)
+				return m, m.searchTracks(prevOffset)
 			}
 		}
 		return m, nil
@@ -472,11 +527,26 @@ func (m RootModel) handleEnter() (tea.Model, tea.Cmd) {
 	}
 	switch m.library.ActiveTab() {
 	case library.TabPlaylists:
+		if m.client == nil {
+			return m, nil
+		}
 		return m, commands.CmdPlayPlaylist(m.client, spotify.URI(uri))
-	case library.TabTracks, library.TabSearch:
+	case library.TabTracks:
+		if m.client == nil {
+			return m, nil
+		}
 		return m, commands.CmdPlayTrack(m.client, spotify.URI(uri))
+	case library.TabSearch:
+		return m, commands.CmdPlayEngineTrack(m.engine, uri)
 	}
 	return m, nil
+}
+
+func (m RootModel) searchTracks(offset int) tea.Cmd {
+	if m.client != nil && m.trackSearcher != nil {
+		return commands.CmdSearchTracks(m.trackSearcher, m.searchQuery, offset)
+	}
+	return commands.CmdSearchEngineTracks(m.engine, m.searchQuery, offset)
 }
 
 func (m RootModel) View() string {
@@ -543,7 +613,18 @@ func (m RootModel) renderMain() string {
 	}
 
 	topBar := views.RenderTopBar(m.width, m.username, m.library.ActiveTab())
-	player := views.RenderPlayer(m.width, m.nowPlaying, m.shuffleOn, m.localProgressMs)
+	var player string
+	if m.client == nil || m.engineTrack != nil {
+		player = views.RenderEnginePlayer(m.width, views.EnginePlayerState{
+			Track:      m.engineTrack,
+			ProgressMS: m.localProgressMs,
+			Playing:    m.enginePlaying,
+			Buffering:  m.engineBuffering,
+			Active:     m.engineActive,
+		})
+	} else {
+		player = views.RenderPlayer(m.width, m.nowPlaying, m.shuffleOn, m.localProgressMs)
+	}
 
 	topBarH := lipgloss.Height(topBar)
 	playerH := lipgloss.Height(player)

@@ -160,6 +160,7 @@ func TestAdapterTranslatesPlaybackEvents(t *testing.T) {
 
 	upstream := []*daemon.ApiEvent{
 		{Type: daemon.ApiEventTypePlaybackReady},
+		{Type: daemon.ApiEventTypeWillPlay},
 		{
 			Type: daemon.ApiEventTypePlaying,
 			Data: daemon.ApiEventDataPlaying{
@@ -187,6 +188,7 @@ func TestAdapterTranslatesPlaybackEvents(t *testing.T) {
 	}
 	want := []EventType{
 		EventTypeReady,
+		EventTypeBuffering,
 		EventTypePlaying,
 		EventTypePaused,
 		EventTypeVolume,

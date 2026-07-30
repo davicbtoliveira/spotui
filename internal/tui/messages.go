@@ -11,6 +11,7 @@ type UserLoadedMsg = msgs.UserLoadedMsg
 type PlaylistsLoadedMsg = msgs.PlaylistsLoadedMsg
 type TracksLoadedMsg = msgs.TracksLoadedMsg
 type TrackSearchLoadedMsg = msgs.TrackSearchLoadedMsg
+type EngineTrackSearchLoadedMsg = msgs.EngineTrackSearchLoadedMsg
 type ArtistsLoadedMsg = msgs.ArtistsLoadedMsg
 type NowPlayingMsg = msgs.NowPlayingMsg
 type TickMsg = msgs.TickMsg

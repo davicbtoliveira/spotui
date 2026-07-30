@@ -4,6 +4,7 @@ type EventType string
 
 const (
 	EventTypeReady            EventType = "ready"
+	EventTypeBuffering        EventType = "buffering"
 	EventTypePlaying          EventType = "playing"
 	EventTypePaused           EventType = "paused"
 	EventTypeStopped          EventType = "stopped"

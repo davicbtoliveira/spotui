@@ -33,6 +33,8 @@ func (s *memoryAPIServer) Emit(event *daemon.ApiEvent) {
 	switch event.Type {
 	case daemon.ApiEventTypePlaybackReady:
 		translated.Type = EventTypeReady
+	case daemon.ApiEventTypeWillPlay:
+		translated.Type = EventTypeBuffering
 	case daemon.ApiEventTypePlaying:
 		data := event.Data.(daemon.ApiEventDataPlaying)
 		translated = Event{

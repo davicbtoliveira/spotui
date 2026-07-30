@@ -33,6 +33,12 @@ type TrackSearchLoadedMsg struct {
 	Offset int
 }
 
+type EngineTrackSearchLoadedMsg struct {
+	Tracks []spotengine.Track
+	Total  int
+	Offset int
+}
+
 type ArtistsLoadedMsg struct {
 	Artists []spotify.FullArtist
 }
