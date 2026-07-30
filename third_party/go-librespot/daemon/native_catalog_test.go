@@ -190,5 +190,18 @@ func TestNativeAlbumHydratesTrackEntries(t *testing.T) {
 	}
 }
 
+func TestTrackValuePreservesProvidedURI(t *testing.T) {
+	metadataGID := make([]byte, 16)
+	metadataGID[15] = 4
+	providedGID := make([]byte, 16)
+	providedGID[15] = 5
+	providedURI := librespot.SpotifyIdFromGid(librespot.SpotifyIdTypeTrack, providedGID).Uri()
+
+	value := trackValue(&metadatapb.Track{Gid: metadataGID, Name: stringPointer("Track")}, providedURI, "")
+	if value["uri"] != providedURI {
+		t.Fatalf("track URI: got %v, want %s", value["uri"], providedURI)
+	}
+}
+
 func stringPointer(value string) *string { return &value }
 func intPointer(value int32) *int32      { return &value }

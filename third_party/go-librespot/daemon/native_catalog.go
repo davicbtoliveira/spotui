@@ -206,6 +206,8 @@ func trackValue(track *metadatapb.Track, uri, parentAlbumURI string) map[string]
 }
 
 func trackURI(track *metadatapb.Track, fallbackURI string) string {
+	// Context pages carry the canonical playable URI. Metadata GIDs can refer
+	// to a relinked/alternative track, so never replace an explicit context URI.
 	if fallbackURI != "" {
 		return fallbackURI
 	}

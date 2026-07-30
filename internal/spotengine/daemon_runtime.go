@@ -13,6 +13,10 @@ import (
 const wslgPulseServer = "/mnt/wslg/PulseServer"
 
 func audioOutput(goos, pulseServer string, hasWSLgPulseServer bool) (backend, runtimeSocket string) {
+	return audioOutputWithUserPulseSocket(goos, pulseServer, hasWSLgPulseServer, "")
+}
+
+func audioOutputWithUserPulseSocket(goos, pulseServer string, hasWSLgPulseServer bool, userPulseSocket string) (backend, runtimeSocket string) {
 	if goos == "darwin" {
 		return "audio-toolbox", ""
 	}
@@ -22,7 +26,22 @@ func audioOutput(goos, pulseServer string, hasWSLgPulseServer bool) (backend, ru
 	if hasWSLgPulseServer {
 		return "pulseaudio", "unix:" + wslgPulseServer
 	}
+	if userPulseSocket != "" {
+		return "pulseaudio", "unix:" + userPulseSocket
+	}
 	return "alsa", ""
+}
+
+func userPulseAudioSocket(goos, runtimeDir string) string {
+	if goos != "linux" || runtimeDir == "" {
+		return ""
+	}
+	socket := filepath.Join(runtimeDir, "pulse", "native")
+	info, err := os.Stat(socket)
+	if err != nil || info.Mode()&os.ModeSocket == 0 {
+		return ""
+	}
+	return socket
 }
 
 func NewAdapter() (*Adapter, error) {
@@ -57,10 +76,11 @@ func newAdapterAtDir(configDir string) (*Adapter, error) {
 		}
 		server := newMemoryAPIServerWithEvents(events)
 		_, wslgPulseErr := os.Stat(wslgPulseServer)
-		audioBackend, audioRuntimeSocket := audioOutput(
+		audioBackend, audioRuntimeSocket := audioOutputWithUserPulseSocket(
 			runtime.GOOS,
 			os.Getenv("PULSE_SERVER"),
 			wslgPulseErr == nil,
+			userPulseAudioSocket(runtime.GOOS, os.Getenv("XDG_RUNTIME_DIR")),
 		)
 
 		config := &daemon.Config{
