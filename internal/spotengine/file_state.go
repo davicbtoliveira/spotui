@@ -2,6 +2,7 @@ package spotengine
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -11,6 +12,25 @@ import (
 
 type fileStateStore struct {
 	path string
+}
+
+func (s *fileStateStore) Clear() error {
+	var errs []error
+	if err := os.Remove(s.path); err != nil && !os.IsNotExist(err) {
+		errs = append(errs, fmt.Errorf("remove local session: %w", err))
+	}
+
+	replacements, err := filepath.Glob(filepath.Join(filepath.Dir(s.path), ".session-*.tmp"))
+	if err != nil {
+		errs = append(errs, fmt.Errorf("find local session replacements: %w", err))
+	} else {
+		for _, replacement := range replacements {
+			if err := os.Remove(replacement); err != nil && !os.IsNotExist(err) {
+				errs = append(errs, fmt.Errorf("remove local session replacement: %w", err))
+			}
+		}
+	}
+	return errors.Join(errs...)
 }
 
 func newFileStateStore(path string) *fileStateStore {

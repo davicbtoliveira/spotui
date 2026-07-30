@@ -23,7 +23,10 @@ func newAdapterAtDir(configDir string) (*Adapter, error) {
 	store := newFileStateStore(filepath.Join(configDir, "session.json"))
 	state, err := store.Load()
 	if err != nil {
-		return nil, err
+		if clearErr := store.Clear(); clearErr != nil {
+			return nil, fmt.Errorf("recover local session: %w", clearErr)
+		}
+		state = nil
 	}
 	hasSession := state != nil && len(state.Credentials.Data) > 0
 

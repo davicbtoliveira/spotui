@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 
 	librespot "github.com/devgianlu/go-librespot"
@@ -93,5 +94,34 @@ func TestAdapterDetectsReusableLocalSession(t *testing.T) {
 	}
 	if !adapter.HasSession() {
 		t.Fatal("adapter did not detect reusable Local Session")
+	}
+}
+
+func TestCorruptLocalSessionRecoversToLoggedOutAdapter(t *testing.T) {
+	configDir := t.TempDir()
+	path := filepath.Join(configDir, "session.json")
+	if err := os.WriteFile(path, []byte(`{"credentials":`), 0o600); err != nil {
+		t.Fatalf("write corrupt session: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(configDir, ".session-stale.tmp"), []byte("secret"), 0o600); err != nil {
+		t.Fatalf("write stale replacement: %v", err)
+	}
+
+	adapter, err := newAdapterAtDir(configDir)
+	if err != nil {
+		t.Fatalf("new adapter: %v", err)
+	}
+	if adapter.HasSession() {
+		t.Fatal("corrupt session was treated as reusable")
+	}
+
+	entries, err := os.ReadDir(configDir)
+	if err != nil {
+		t.Fatalf("read config directory: %v", err)
+	}
+	for _, entry := range entries {
+		if strings.HasSuffix(entry.Name(), ".tmp") {
+			t.Fatalf("temporary session leaked after recovery: %s", entry.Name())
+		}
 	}
 }
