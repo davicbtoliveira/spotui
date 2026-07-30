@@ -211,10 +211,7 @@ func albumValue(album *metadatapb.Album, fallbackURI string) map[string]any {
 	if album == nil {
 		return map[string]any{"uri": fallbackURI, "name": ""}
 	}
-	uri := fallbackURI
-	if len(album.Gid) == 16 {
-		uri = librespot.SpotifyIdFromGid(librespot.SpotifyIdType("album"), album.Gid).Uri()
-	}
+	uri := albumURI(album, fallbackURI)
 	artists := make([]any, 0, len(album.Artist))
 	for _, artist := range album.Artist {
 		artists = append(artists, artistValue(artist))
@@ -233,6 +230,13 @@ func albumValue(album *metadatapb.Album, fallbackURI string) map[string]any {
 		"images":        imageValues(album.Cover, album.CoverGroup),
 		"external_urls": map[string]any{"spotify": externalURL(uri)},
 	}
+}
+
+func albumURI(album *metadatapb.Album, fallbackURI string) string {
+	if album != nil && len(album.Gid) == 16 {
+		return librespot.SpotifyIdFromGid(librespot.SpotifyIdType("album"), album.Gid).Uri()
+	}
+	return fallbackURI
 }
 
 func artistValue(artist *metadatapb.Artist) map[string]any {
@@ -337,27 +341,47 @@ func nativeArtist(ctx context.Context, client *spclient.Spclient, request ApiReq
 			popular = append(popular, trackValue(track, "", ""))
 		}
 	}
-	albums := make([]any, 0)
+	albumURIs := make([]string, 0)
 	seen := map[string]bool{}
 	for _, group := range append(append(append(artist.AlbumGroup, artist.SingleGroup...), artist.CompilationGroup...), artist.AppearsOnGroup...) {
 		for _, album := range group.Album {
-			value := albumValue(album, "")
-			uri, _ := value["uri"].(string)
-			if uri != "" && seen[uri] {
+			uri := albumURI(album, "")
+			if uri == "" || seen[uri] {
 				continue
 			}
 			seen[uri] = true
+			albumURIs = append(albumURIs, uri)
+		}
+	}
+	start := minInt(request.Offset, len(albumURIs))
+	end := minInt(start+request.Limit, len(albumURIs))
+	albums := make([]any, 0, end-start)
+	for _, uri := range albumURIs[start:end] {
+		value, ok := nativeAlbumSummary(ctx, client, uri)
+		if ok {
 			albums = append(albums, value)
 		}
 	}
-	start := minInt(request.Offset, len(albums))
-	end := minInt(start+request.Limit, len(albums))
 	return map[string]any{
 		"artist":  artistValue(&artist),
 		"genres":  []string{},
 		"popular": nativePage{Items: popular, Total: len(popular), Offset: 0, Limit: len(popular)}.value(),
-		"albums":  nativePage{Items: albums[start:end], Total: len(albums), Offset: request.Offset, Limit: request.Limit}.value(),
+		"albums":  nativePage{Items: albums, Total: len(albumURIs), Offset: request.Offset, Limit: request.Limit}.value(),
 	}, nil
+}
+
+func nativeAlbumSummary(ctx context.Context, client *spclient.Spclient, uri string) (map[string]any, bool) {
+	id, err := librespot.SpotifyIdFromUri(uri)
+	if err != nil {
+		return nil, false
+	}
+	var album metadatapb.Album
+	if err := client.ExtendedMetadataSimple(ctx, *id, extmetadatapb.ExtensionKind_ALBUM_V4, &album); err != nil {
+		return nil, false
+	}
+	value := albumValue(&album, uri)
+	name, _ := value["name"].(string)
+	return value, name != ""
 }
 
 func nativePlaylist(ctx context.Context, log librespot.Logger, client *spclient.Spclient, request ApiRequestDataNativeCatalog) (any, error) {

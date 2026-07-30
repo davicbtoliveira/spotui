@@ -62,3 +62,27 @@ func TestBrowsePlaylistPreservesContextPlayback(t *testing.T) {
 		t.Fatalf("calls: %#v", calls)
 	}
 }
+
+func TestBrowseArtistDoesNotRenderEmptyAlbumRows(t *testing.T) {
+	engine := spotengine.NewFake()
+	m := browseReadyModel(engine)
+	m.browseRoute = "artist:spotify:artist:arctic-monkeys"
+	updated, _ := m.Update(msgs.CatalogLoadedMsg{
+		Route: m.browseRoute,
+		Data: spotengine.ArtistDetail{
+			ArtistSummary: spotengine.ArtistSummary{Name: "Arctic Monkeys", ImageURL: "https://image.test/arctic"},
+			Albums: []spotengine.AlbumSummary{
+				{URI: "spotify:album:incomplete"},
+				{URI: "spotify:album:am", Name: "AM", Artist: "Arctic Monkeys", ReleaseDate: "2013", TrackCount: 12},
+			},
+		},
+	})
+	m = updated.(RootModel)
+	view := m.View()
+	if strings.Contains(view, "0 tracks") || strings.Contains(view, "· ·") {
+		t.Fatalf("artist view rendered an empty album row:\n%s", view)
+	}
+	if !strings.Contains(view, "AM") || !strings.Contains(view, "12 tracks") {
+		t.Fatalf("artist view lost the valid album:\n%s", view)
+	}
+}

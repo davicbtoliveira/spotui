@@ -131,14 +131,20 @@ func (m *RootModel) applyCatalogMessage(msg CatalogLoadedMsg) tea.Cmd {
 	case spotengine.ArtistDetail:
 		m.browseTitle = value.Name
 		m.browseMeta = strings.Join(value.Genres, " · ")
+		m.browseItems = make([]browseItem, 0, len(value.Popular.Items)+len(value.Albums)+1)
 		if value.ImageURL != "" {
-			m.browseItems = []browseItem{{kind: "header", Title: "Artist artwork", ImageURL: value.ImageURL}}
+			m.browseItems = append(m.browseItems, browseItem{kind: "header", Title: "Artist artwork", ImageURL: value.ImageURL})
 		}
-		m.browseItems = append(m.browseItems, make([]browseItem, 0, len(value.Popular.Items)+len(value.Albums))...)
 		for _, item := range value.Popular.Items {
+			if item.Name == "" {
+				continue
+			}
 			m.browseItems = append(m.browseItems, trackItem(item))
 		}
 		for _, item := range value.Albums {
+			if item.Name == "" {
+				continue
+			}
 			m.browseItems = append(m.browseItems, albumItem(item))
 		}
 	}
