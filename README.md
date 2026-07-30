@@ -77,3 +77,8 @@ make run
 - Go 1.22+
 - Spotify Premium account (required for playback control)
 - An active Spotify session on any device before using playback controls
+
+## License
+
+SpotUI is licensed under GPL-3.0-only. See [LICENSE](LICENSE) and
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
