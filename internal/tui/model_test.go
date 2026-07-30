@@ -49,7 +49,7 @@ func TestLoggedOutScreenWaitsForExplicitLogin(t *testing.T) {
 	m := NewRootModel(engine, browser.Open)
 	m.width, m.height = 80, 24
 
-	if m.Init() != nil || len(engine.Calls()) != 0 || len(browser.urls) != 0 {
+	if m.Init() == nil || len(engine.Calls()) != 0 || len(browser.urls) != 0 {
 		t.Fatal("initial screen started Login")
 	}
 	for _, want := range []string{"Spotify Premium", "Enter", "Log in"} {
@@ -62,6 +62,59 @@ func TestLoggedOutScreenWaitsForExplicitLogin(t *testing.T) {
 	m = updated.(RootModel)
 	if _, ok := startCmd().(msgs.EngineStartedMsg); !ok || m.state != stateAuthenticating {
 		t.Fatal("Enter did not start Login")
+	}
+}
+
+func TestPlaybackProgressStartsTickingAndAdvancesWhilePlaying(t *testing.T) {
+	engine := spotengine.NewFake()
+	m := NewRootModel(engine, func(string) error { return nil })
+	m.state = stateReady
+	m.width, m.height = 90, 24
+	m.engineTrack = &spotengine.Track{Name: "Hello", DurationMS: 100000}
+	m.enginePlaying = true
+
+	if m.Init() == nil {
+		t.Fatal("initialization did not start the progress clock")
+	}
+
+	updated, nextTick := m.Update(msgs.ProgressTickMsg{})
+	m = updated.(RootModel)
+	if m.localProgressMs != 1000 {
+		t.Fatalf("progress = %dms, want 1000ms", m.localProgressMs)
+	}
+	if !strings.Contains(m.View(), "00:01/01:40") {
+		t.Fatalf("visible progress did not advance:\n%s", m.View())
+	}
+	if nextTick == nil {
+		t.Fatal("progress clock did not schedule the next tick")
+	}
+}
+
+func TestPlaybackProgressDoesNotAdvanceWhilePaused(t *testing.T) {
+	engine := spotengine.NewFake()
+	m := readyModel(engine)
+	m.engineTrack = &spotengine.Track{Name: "Hello", DurationMS: 100000}
+	m.localProgressMs = 12000
+	m.enginePlaying = false
+
+	updated, _ := m.Update(msgs.ProgressTickMsg{})
+	m = updated.(RootModel)
+	if m.localProgressMs != 12000 {
+		t.Fatalf("paused progress = %dms, want 12000ms", m.localProgressMs)
+	}
+}
+
+func TestPlaybackProgressStopsAtTrackDuration(t *testing.T) {
+	engine := spotengine.NewFake()
+	m := readyModel(engine)
+	m.engineTrack = &spotengine.Track{Name: "Hello", DurationMS: 12500}
+	m.localProgressMs = 12000
+	m.enginePlaying = true
+
+	updated, _ := m.Update(msgs.ProgressTickMsg{})
+	m = updated.(RootModel)
+	if m.localProgressMs != 12500 {
+		t.Fatalf("progress = %dms, want track duration 12500ms", m.localProgressMs)
 	}
 }
 

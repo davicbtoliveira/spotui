@@ -100,9 +100,9 @@ func NewRootModelWithRecovery(
 
 func (m RootModel) Init() tea.Cmd {
 	if m.state == stateLoading {
-		return commands.CmdStartEngine(m.engine)
+		return tea.Batch(commands.CmdStartEngine(m.engine), commands.CmdProgressTick())
 	}
-	return nil
+	return commands.CmdProgressTick()
 }
 
 func (m RootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
