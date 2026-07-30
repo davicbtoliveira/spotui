@@ -80,6 +80,12 @@ func (s *memoryAPIServer) Emit(event *daemon.ApiEvent) {
 			PositionMS: data.Position,
 			DurationMS: data.Duration,
 		}
+	case daemon.ApiEventTypeAccountProduct:
+		data := event.Data.(daemon.ApiEventDataAccountProduct)
+		translated = Event{
+			Type:    EventTypeAccountProduct,
+			Product: data.Product,
+		}
 	default:
 		return
 	}

@@ -214,6 +214,21 @@ func TestAdapterTranslatesPlaybackEvents(t *testing.T) {
 	}
 }
 
+func TestAdapterTranslatesAccountProductEvent(t *testing.T) {
+	server := newMemoryAPIServer()
+	adapter := newAdapter(newLifecycleRuntime(), server)
+
+	server.Emit(&daemon.ApiEvent{
+		Type: daemon.ApiEventTypeAccountProduct,
+		Data: daemon.ApiEventDataAccountProduct{Product: "free"},
+	})
+
+	event := <-adapter.Events()
+	if event.Type != EventTypeAccountProduct || event.Product != "free" {
+		t.Fatalf("event: %#v", event)
+	}
+}
+
 func TestNewAdapterReturnsStableEngine(t *testing.T) {
 	adapter, err := newAdapterAtDir(t.TempDir())
 	if err != nil {

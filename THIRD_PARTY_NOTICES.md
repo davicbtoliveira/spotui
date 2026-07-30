@@ -11,13 +11,14 @@ SpotUI incorporates go-librespot in-process.
 - Upstream: <https://github.com/devgianlu/go-librespot>
 - Upstream base revision: `bfa4a350025b9df1b5da8f568753be4f37e4bef0`
 - SpotUI fork: <https://github.com/davicbtoliveira/go-librespot>
-- Pinned fork revision: `589b659189c9f644dfc7c36a08cb7ca4f85b3e67`
+- Pinned fork revision: `93bc25419570329a8f87eacb1cd03fd6238093fb`
 - Copyright notice shipped by upstream: Copyright (C) 2023 devgianlu
 - License: GNU General Public License version 3
 
 The SpotUI fork modifies go-librespot to expose an interactive Authorization
-URL Hook and to add a runtime-safe Autoplay request. Those changes are recorded
-in fork commits `26108cb` and `589b659`.
+URL Hook, make its callback lifecycle cancelable, add a runtime-safe Autoplay
+request, and expose account product events. Those changes are recorded in fork
+commits `26108cb`, `589b659`, `f08561f`, and `93bc254`.
 
 The complete corresponding source for SpotUI and the modified go-librespot fork
 is available at the repositories linked above. Binary distributions must

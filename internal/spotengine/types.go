@@ -14,6 +14,7 @@ const (
 	EventTypeSeek             EventType = "seek"
 	EventTypeAuthorizationURL EventType = "authorization_url"
 	EventTypeError            EventType = "error"
+	EventTypeAccountProduct   EventType = "account_product"
 )
 
 type Track struct {
@@ -35,4 +36,5 @@ type Event struct {
 	VolumeMax  int
 	URL        string
 	Err        error
+	Product    string
 }
