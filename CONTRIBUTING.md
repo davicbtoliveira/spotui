@@ -24,10 +24,10 @@ test suite does not use credentials, a browser, network access, or audio.
 | --- | --- |
 | `main.go` | Process entry point and graceful engine shutdown |
 | `internal/tui` | Bubble Tea model, browse shell, commands, and views |
+| `internal/catalog` | Typed browse routes and catalog command payloads |
 | `internal/spotengine` | `Engine` boundary and the go-librespot adapter |
 | `internal/browser` | Cross-platform authorization URL opening |
 | `internal/artwork` | Terminal artwork decoding and rendering |
-| `internal/library` | Track-list state used by the UI |
 | `third_party/go-librespot` | Pinned fork used for authentication, catalog, Connect, and playback |
 | `docs/adr` | Decisions that constrain architecture or product behavior |
 | `.github/workflows/release.yml` | Test, build, package, and publish release archives |

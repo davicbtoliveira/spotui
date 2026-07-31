@@ -47,7 +47,9 @@ normal process shutdown preserves the reusable session.
 The Bubble Tea model owns UI state: navigation focus, catalog pages, detail
 routes, the player bar, login screens, and reconnect status. Commands in
 `internal/tui/commands` perform asynchronous engine operations and return
-messages; views in `internal/tui/views` only format display state.
+typed catalog payloads; views in `internal/tui/views` only format display
+state. Browse routes and their result payloads live in `internal/catalog`, so
+the TUI does not coordinate open strings with `any` values.
 
 The TUI must not import `go-librespot` directly. This keeps the UI testable with
 the in-memory fake engine and prevents protocol details from leaking into
@@ -55,10 +57,11 @@ presentation code.
 
 ### `internal/spotengine`
 
-`Engine` is the application-facing contract. `Adapter` translates that
-contract into go-librespot daemon requests and translates engine events back
-into a small SpotUI event model. It also owns reconnect and logout lifecycle
-operations.
+`Engine` is the composed application-facing contract built from smaller
+session, catalog, playback, and event-source interfaces. Commands depend only
+on the capability they use. `Adapter` translates that contract into go-librespot
+daemon requests and translates engine events back into a small SpotUI event
+model. It also owns reconnect and logout lifecycle operations.
 
 Catalog reads use the native catalog capabilities exposed by the pinned fork.
 This keeps browsing and grouped search inside the same authenticated runtime
