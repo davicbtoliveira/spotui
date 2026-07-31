@@ -35,20 +35,44 @@ Windows is not supported and no Windows artifact is published. The first
 Login must run in a local terminal on Linux or macOS; remote SSH and headless
 first-login flows are not supported.
 
-## Install a release
+## Install, update, and uninstall
 
-Download the archive for your platform from the
-[releases page](https://github.com/dcbto/spotui/releases). Releases also
-provide `SHA256SUMS` for verification. Each archive contains the `spotui`
-binary, `LICENSE`, and `THIRD_PARTY_NOTICES.md`.
+The installer detects the operating system and architecture, downloads the
+matching release archive, verifies its SHA-256 checksum, and installs `spotui`
+in `~/.local/bin`:
 
 ```bash
-tar -xzf spotui-linux-amd64.tar.gz
-cd spotui-linux-amd64
-./spotui
+curl -fsSL https://raw.githubusercontent.com/davicbtoliveira/spotui/main/install.sh | sh
 ```
 
-Replace the archive and directory names with the macOS artifact when needed.
+Run the same command to update SpotUI to the latest release. To install a
+specific version, pass `SPOTUI_VERSION` to the installer:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/davicbtoliveira/spotui/main/install.sh \
+  | SPOTUI_VERSION=v0.1.0 sh
+```
+
+The installer supports Linux x86_64 and macOS Intel/Apple Silicon. Linux arm64
+and Windows artifacts are not published. Set `SPOTUI_INSTALL_DIR` to change the
+installation directory.
+
+To uninstall the binary while keeping the local session and settings:
+
+```bash
+rm -f "${SPOTUI_INSTALL_DIR:-$HOME/.local/bin}/spotui"
+```
+
+To also remove the local SpotUI data, delete the platform-specific directory:
+
+```bash
+# Linux
+rm -rf "${XDG_CONFIG_HOME:-$HOME/.config}/spotui"
+
+# macOS
+rm -rf "$HOME/Library/Application Support/spotui"
+```
+
 On first launch, press `Enter` and finish authorization in the browser. If the
 browser does not open, SpotUI displays the authorization URL so it can be
 copied manually.
