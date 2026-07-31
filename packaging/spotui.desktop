@@ -1,0 +1,8 @@
+[Desktop Entry]
+Name=SpotUI
+Comment=Zero-configuration Spotify client for the terminal
+Exec=spotui
+Icon=spotui
+Terminal=true
+Type=Application
+Categories=AudioVideo;Music;

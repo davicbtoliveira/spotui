@@ -31,7 +31,7 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - runner: ubuntu-24.04
+          - runner: ubuntu-22.04
             goos: linux
             goarch: amd64
             suffix: linux-amd64
@@ -77,10 +77,51 @@ jobs:
           "${{ matrix.tar }}" --sort=name --mtime="@0" --owner=0 --group=0 --numeric-owner \
             -cf - -C dist "$archive" | gzip -n > "dist/$archive.tar.gz"
 
+      - name: Build portable Linux AppImage
+        if: runner.os == 'Linux'
+        env:
+          APPIMAGE_EXTRACT_AND_RUN: "1"
+          NO_STRIP: "1"
+        run: |
+          appdir="$RUNNER_TEMP/spotui.AppDir"
+          appimage_workdir="$RUNNER_TEMP/spotui-appimage"
+          mkdir -p \
+            "$appdir/usr/bin" \
+            "$appdir/usr/share/applications" \
+            "$appdir/usr/share/icons/hicolor/scalable/apps" \
+            "$appimage_workdir"
+          cp "dist/spotui-${{ matrix.suffix }}/spotui" "$appdir/usr/bin/spotui"
+          cp LICENSE THIRD_PARTY_NOTICES.md "$appdir/"
+          cp packaging/spotui.desktop "$appdir/usr/share/applications/spotui.desktop"
+          cp packaging/spotui.svg "$appdir/usr/share/icons/hicolor/scalable/apps/spotui.svg"
+          curl --fail --location --silent --show-error \
+            https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage \
+            --output "$appimage_workdir/linuxdeploy.AppImage"
+          chmod +x "$appimage_workdir/linuxdeploy.AppImage"
+          cd "$appimage_workdir"
+          "$appimage_workdir/linuxdeploy.AppImage" \
+            --appdir "$appdir" \
+            --executable "$appdir/usr/bin/spotui" \
+            --desktop-file "$appdir/usr/share/applications/spotui.desktop" \
+            --icon-file "$appdir/usr/share/icons/hicolor/scalable/apps/spotui.svg" \
+            --output appimage
+          appimage="$(find . -maxdepth 1 -type f -name '*.AppImage' -print -quit)"
+          test -n "$appimage"
+          mv "$appimage" "$GITHUB_WORKSPACE/dist/spotui-linux-amd64.AppImage"
+
       - uses: actions/upload-artifact@v4
+        if: runner.os == 'macOS'
         with:
           name: spotui-${{ matrix.suffix }}
           path: dist/spotui-${{ matrix.suffix }}.tar.gz
+          if-no-files-found: error
+
+      - name: Upload portable Linux AppImage
+        if: runner.os == 'Linux'
+        uses: actions/upload-artifact@v4
+        with:
+          name: spotui-linux-amd64-appimage
+          path: dist/spotui-linux-amd64.AppImage
           if-no-files-found: error
 
   release:
@@ -96,10 +137,11 @@ jobs:
           merge-multiple: true
 
       - name: Generate checksums
-        run: cd dist && sha256sum spotui-*.tar.gz > SHA256SUMS
+        run: cd dist && sha256sum spotui-*.tar.gz spotui-*.AppImage > SHA256SUMS
 
       - uses: softprops/action-gh-release@v2
         with:
           files: |
             dist/spotui-*.tar.gz
+            dist/spotui-*.AppImage
             dist/SHA256SUMS

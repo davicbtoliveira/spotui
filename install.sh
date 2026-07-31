@@ -8,7 +8,6 @@ die() {
 }
 
 command -v curl >/dev/null 2>&1 || die "curl is required"
-command -v tar >/dev/null 2>&1 || die "tar is required"
 
 if command -v sha256sum >/dev/null 2>&1; then
   checksum_tool=sha256sum
@@ -40,7 +39,15 @@ home_dir=${HOME:-}
 repo=${SPOTUI_REPO:-davicbtoliveira/spotui}
 install_dir=${SPOTUI_INSTALL_DIR:-$home_dir/.local/bin}
 version=${SPOTUI_VERSION:-latest}
-asset="spotui-${os}-${arch}.tar.gz"
+
+if [ "$os" = linux ]; then
+  format=appimage
+  asset=spotui-linux-amd64.AppImage
+else
+  format=archive
+  asset="spotui-${os}-${arch}.tar.gz"
+  command -v tar >/dev/null 2>&1 || die "tar is required on macOS"
+fi
 
 if [ "$version" = latest ]; then
   release_base="https://github.com/$repo/releases/latest/download"
@@ -74,10 +81,14 @@ fi
 [ "$expected_checksum" = "$actual_checksum" ] || \
   die "checksum verification failed for $asset"
 
-mkdir "$tmp_dir/extracted"
-tar -xzf "$tmp_dir/$asset" -C "$tmp_dir/extracted"
-binary="$tmp_dir/extracted/spotui-${os}-${arch}/spotui"
-[ -f "$binary" ] || die "the release archive does not contain spotui"
+if [ "$format" = appimage ]; then
+  binary="$tmp_dir/$asset"
+else
+  mkdir "$tmp_dir/extracted"
+  tar -xzf "$tmp_dir/$asset" -C "$tmp_dir/extracted"
+  binary="$tmp_dir/extracted/spotui-${os}-${arch}/spotui"
+fi
+[ -f "$binary" ] || die "the release artifact does not contain spotui"
 
 mkdir -p "$install_dir"
 if command -v install >/dev/null 2>&1; then

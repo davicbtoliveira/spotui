@@ -27,7 +27,7 @@ with or endorsed by Spotify.
 
 | Target | Release artifact | Notes |
 | --- | --- | --- |
-| Linux x86_64 | `spotui-linux-amd64.tar.gz` | PulseAudio or ALSA |
+| Linux x86_64 | `spotui-linux-amd64.AppImage` | Portable; PulseAudio or ALSA |
 | macOS Intel | `spotui-darwin-amd64.tar.gz` | AudioToolbox |
 | macOS Apple Silicon | `spotui-darwin-arm64.tar.gz` | AudioToolbox |
 
@@ -38,7 +38,7 @@ first-login flows are not supported.
 ## Install, update, and uninstall
 
 The installer detects the operating system and architecture, downloads the
-matching release archive, verifies its SHA-256 checksum, and installs `spotui`
+matching release artifact, verifies its SHA-256 checksum, and installs `spotui`
 in `~/.local/bin`:
 
 ```bash
@@ -54,8 +54,23 @@ curl -fsSL https://raw.githubusercontent.com/davicbtoliveira/spotui/main/install
 ```
 
 The installer supports Linux x86_64 and macOS Intel/Apple Silicon. Linux arm64
-and Windows artifacts are not published. Set `SPOTUI_INSTALL_DIR` to change the
-installation directory.
+and Windows artifacts are not published. On Linux, the AppImage includes the
+FLAC, Ogg, and Vorbis runtime libraries, so the distribution's codec library
+versions do not need to match the build environment. Set
+`SPOTUI_INSTALL_DIR` to change the installation directory.
+
+On macOS, install the native audio libraries before the first launch:
+
+```bash
+brew install flac libvorbis
+```
+
+If a Linux system does not provide AppImage FUSE support, run the installed
+binary with:
+
+```bash
+APPIMAGE_EXTRACT_AND_RUN=1 spotui
+```
 
 To uninstall the binary while keeping the local session and settings:
 
@@ -86,11 +101,11 @@ native audio dependencies for the target platform.
 
 ```bash
 sudo apt-get update
-sudo apt-get install -y libasound2-dev libflac-dev pkg-config
+sudo apt-get install -y libasound2-dev libflac-dev libvorbis-dev pkg-config
 ```
 
-Use the equivalent ALSA, FLAC, and `pkg-config` development packages on other
-Linux distributions.
+Use the equivalent ALSA, FLAC, Vorbis, and `pkg-config` development packages
+on other Linux distributions.
 
 ### macOS
 
@@ -98,7 +113,7 @@ Install the Xcode command-line tools and, if needed, Homebrew:
 
 ```bash
 xcode-select --install
-brew install flac pkg-config
+brew install flac libvorbis pkg-config
 ```
 
 Then build and run:
