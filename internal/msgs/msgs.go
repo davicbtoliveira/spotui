@@ -1,22 +1,13 @@
 package msgs
 
 import (
-	"github.com/dcbto/spotui/internal/spotengine"
 	"image"
+
+	"github.com/dcbto/spotui/internal/catalog"
+	"github.com/dcbto/spotui/internal/spotengine"
 )
 
-type EngineTrackSearchLoadedMsg struct {
-	Tracks []spotengine.Track
-	Total  int
-	Offset int
-}
-
-type CatalogLoadedMsg struct {
-	Route     string
-	RequestID uint64
-	Data      any
-	Err       error
-}
+type CatalogLoadedMsg = catalog.Result
 
 type ShuffleChangedMsg struct{ Enabled bool }
 
@@ -29,6 +20,11 @@ type ArtworkLoadedMsg struct {
 type ErrMsg struct {
 	Err     error
 	Context string
+}
+
+type VolumeSetMsg struct {
+	Volume int
+	Err    error
 }
 
 type ClearStatusMsg struct{}

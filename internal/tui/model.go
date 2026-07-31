@@ -10,7 +10,7 @@ import (
 
 	"github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/dcbto/spotui/internal/library"
+	"github.com/dcbto/spotui/internal/catalog"
 	"github.com/dcbto/spotui/internal/spotengine"
 	"github.com/dcbto/spotui/internal/theme"
 	"github.com/dcbto/spotui/internal/tui/commands"
@@ -41,17 +41,8 @@ type RootModel struct {
 
 	waitingEngine bool
 
-	library *library.Library
-
-	localProgressMs   int
-	engineTrack       *spotengine.Track
-	enginePlaying     bool
-	engineBuffering   bool
-	engineActive      bool
-	engineVolume      int
-	engineAutoplay    bool
-	engineShuffle     bool
-	engineTransferred bool
+	playerState
+	browseState
 
 	statusMsg        string
 	statusIsErr      bool
@@ -62,36 +53,6 @@ type RootModel struct {
 	waitForRecovery func(time.Duration) tea.Cmd
 	recoveryJitter  func() float64
 	recoveryAttempt int
-
-	searchInputActive bool
-	searchQuery       string
-	searchLoading     bool
-	searchCompleted   bool
-	searchOffset      int
-	searchTotal       int
-
-	browseInitialized   bool
-	activeSection       int
-	navCursor           int
-	browseFocus         int
-	browseRoute         string
-	browseTitle         string
-	browseItems         []browseItem
-	browseCursor        int
-	browseLoading       bool
-	browseError         string
-	browseOffset        int
-	browseTotal         int
-	browseContextURI    string
-	browseContextKind   string
-	browseStack         []browseSnapshot
-	browseRequestID     uint64
-	browseMeta          string
-	browseCache         map[string]CatalogLoadedMsg
-	artwork             map[string]image.Image
-	artworkLoading      map[string]bool
-	groupedSearchActive bool
-	groupedSearch       spotengine.SearchGroups
 }
 
 func NewRootModel(engine spotengine.Engine, openURL func(string) error) RootModel {
@@ -112,18 +73,20 @@ func NewRootModelWithRecovery(
 	recoveryJitter func() float64,
 ) RootModel {
 	model := RootModel{
-		state:           stateLoggedOut,
-		engine:          engine,
-		openURL:         openURL,
-		library:         library.New(),
-		engineVolume:    100,
-		engineAutoplay:  engine.AutoplayEnabled(),
-		activeSection:   sectionLibrary,
-		navCursor:       sectionLibrary,
-		browseFocus:     1,
-		browseCache:     make(map[string]CatalogLoadedMsg),
-		artwork:         make(map[string]image.Image),
-		artworkLoading:  make(map[string]bool),
+		state:   stateLoggedOut,
+		engine:  engine,
+		openURL: openURL,
+		playerState: playerState{
+			engineVolume:   100,
+			engineAutoplay: engine.AutoplayEnabled(),
+		},
+		browseState: browseState{
+			navCursor:      0,
+			browseFocus:    1,
+			browseCache:    make(map[catalog.CacheKey]CatalogLoadedMsg),
+			artwork:        make(map[string]image.Image),
+			artworkLoading: make(map[string]bool),
+		},
 		waitForRecovery: waitForRecovery,
 		recoveryJitter:  recoveryJitter,
 	}
@@ -212,7 +175,7 @@ func (m RootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.statusIsErr = false
 				if !m.browseInitialized {
 					m.browseInitialized = true
-					m.browseRoute = "liked"
+					m.browseRoute = catalog.Route{Kind: catalog.RouteLiked}
 					m.browseTitle = "Liked Tracks"
 					return m, tea.Batch(m.waitEngineEvent(), m.loadBrowseRoute())
 				}
@@ -252,10 +215,12 @@ func (m RootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.engineBuffering = false
 			m.engineTransferred = true
 		case spotengine.EventTypeVolume:
-			if msg.Event.VolumeMax > 0 {
-				m.engineVolume = msg.Event.Volume * 100 / msg.Event.VolumeMax
-			} else {
-				m.engineVolume = msg.Event.Volume
+			if !m.volumeCommandInFlight {
+				if msg.Event.VolumeMax > 0 {
+					m.engineVolume = msg.Event.Volume * 100 / msg.Event.VolumeMax
+				} else {
+					m.engineVolume = msg.Event.Volume
+				}
 			}
 		case spotengine.EventTypeSessionEnded:
 			if m.state == stateLoggedOut || m.state == stateCancelling || m.state == stateUnsupported {
@@ -360,33 +325,13 @@ func (m RootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.state = stateLoading
 		return m, commands.CmdStartEngine(m.engine)
 
-	case EngineTrackSearchLoadedMsg:
-		translated := make([]library.TrackEntry, len(msg.Tracks))
-		for i, track := range msg.Tracks {
-			translated[i] = library.TrackEntry{
-				Name:     track.Name,
-				Artist:   track.Artist,
-				Duration: track.DurationMS,
-				URI:      track.URI,
-			}
-		}
-		m.library.SetSearchResults(translated)
-		m.searchLoading = false
-		m.searchCompleted = true
-		m.searchOffset = msg.Offset
-		m.searchTotal = msg.Total
-		return m, nil
-
 	case CatalogLoadedMsg:
 		return m, m.applyCatalogMessage(msg)
 
 	case ArtworkLoadedMsg:
 		delete(m.artworkLoading, msg.URL)
 		if msg.Err == nil && msg.Image != nil {
-			if m.artwork == nil {
-				m.artwork = make(map[string]image.Image)
-			}
-			m.artwork[msg.URL] = msg.Image
+			m.cacheArtwork(msg.URL, msg.Image)
 		}
 		return m, nil
 
@@ -409,12 +354,22 @@ func (m RootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, commands.CmdProgressTick()
 
+	case VolumeSetMsg:
+		if msg.Err != nil {
+			m.volumeCommandInFlight = false
+			m.statusMsg = "set volume: " + msg.Err.Error()
+			m.statusIsErr = true
+			return m, commands.CmdClearStatus()
+		}
+		if m.engineVolume != msg.Volume {
+			return m, commands.CmdSetEngineVolume(m.engine, m.engineVolume)
+		}
+		m.volumeCommandInFlight = false
+		return m, nil
+
 	case ErrMsg:
 		m.statusMsg = msg.Context + ": " + msg.Err.Error()
 		m.statusIsErr = true
-		if msg.Context == "search tracks" {
-			m.searchLoading = false
-		}
 		return m, commands.CmdClearStatus()
 
 	case ClearStatusMsg:
@@ -443,7 +398,6 @@ func isSpotifyAccessError(err error) bool {
 }
 
 func (m *RootModel) clearAccount() {
-	m.library = library.New()
 	m.localProgressMs = 0
 	m.engineTrack = nil
 	m.enginePlaying = false
@@ -455,15 +409,10 @@ func (m *RootModel) clearAccount() {
 	m.engineShuffle = false
 	m.searchInputActive = false
 	m.searchQuery = ""
-	m.searchLoading = false
-	m.searchCompleted = false
-	m.searchOffset = 0
-	m.searchTotal = 0
 	m.browseInitialized = false
-	m.activeSection = sectionLibrary
-	m.navCursor = sectionLibrary
+	m.navCursor = 0
 	m.browseFocus = 1
-	m.browseRoute = ""
+	m.browseRoute = catalog.Route{}
 	m.browseTitle = ""
 	m.browseItems = nil
 	m.browseCursor = 0
@@ -472,13 +421,12 @@ func (m *RootModel) clearAccount() {
 	m.browseOffset = 0
 	m.browseTotal = 0
 	m.browseContextURI = ""
-	m.browseContextKind = ""
 	m.browseStack = nil
-	m.browseCache = make(map[string]CatalogLoadedMsg)
+	m.browseCache = make(map[catalog.CacheKey]CatalogLoadedMsg)
+	m.browseCacheOrder = nil
 	m.artwork = make(map[string]image.Image)
 	m.artworkLoading = make(map[string]bool)
-	m.groupedSearchActive = false
-	m.groupedSearch = spotengine.SearchGroups{}
+	m.artworkOrder = nil
 }
 
 func (m *RootModel) waitEngineEvent() tea.Cmd {
@@ -609,35 +557,6 @@ func (m RootModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.handleBrowseKey(msg)
 	}
 
-	if m.state == stateReady && m.searchInputActive {
-		switch msg.Type {
-		case tea.KeyRunes:
-			m.searchQuery += string(msg.Runes)
-			return m, nil
-		case tea.KeySpace:
-			m.searchQuery += " "
-			return m, nil
-		case tea.KeyBackspace, tea.KeyCtrlH:
-			runes := []rune(m.searchQuery)
-			if len(runes) > 0 {
-				m.searchQuery = string(runes[:len(runes)-1])
-			}
-			return m, nil
-		case tea.KeyEsc:
-			m.searchInputActive = false
-			return m, nil
-		case tea.KeyEnter:
-			if strings.TrimSpace(m.searchQuery) == "" {
-				return m, nil
-			}
-			m.searchInputActive = false
-			m.searchLoading = true
-			m.searchCompleted = false
-			m.searchOffset = 0
-			return m, m.searchTracks(0)
-		}
-	}
-
 	if m.state == stateLoggedOut && msg.Type == tea.KeyEnter {
 		m.state = stateAuthenticating
 		m.statusMsg = ""
@@ -646,113 +565,7 @@ func (m RootModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, commands.CmdStartEngine(m.engine)
 	}
 
-	switch msg.String() {
-	case KeyQuitAlt:
-		return m, tea.Quit
-	case KeyHelp:
-		m.showHelp = true
-		return m, nil
-	}
-
-	if m.state != stateReady {
-		return m, nil
-	}
-
-	switch msg.String() {
-	case KeySearch:
-		m.searchInputActive = true
-		return m, nil
-
-	case KeySpace:
-		if m.engineTransferred {
-			return m, nil
-		}
-		if m.enginePlaying {
-			return m, commands.CmdPauseEngine(m.engine)
-		}
-		return m, commands.CmdResumeEngine(m.engine)
-
-	case KeyNext:
-		if m.engineTransferred {
-			return m, nil
-		}
-		return m, commands.CmdNextEngine(m.engine)
-
-	case KeyPrev:
-		if m.engineTransferred {
-			return m, nil
-		}
-		return m, commands.CmdPreviousEngine(m.engine)
-
-	case KeyVolumeDown:
-		if m.engineTransferred {
-			return m, nil
-		}
-		volume := m.engineVolume - 5
-		if volume < 0 {
-			volume = 0
-		}
-		return m, commands.CmdSetEngineVolume(m.engine, volume)
-
-	case KeyVolumeUp:
-		if m.engineTransferred {
-			return m, nil
-		}
-		volume := m.engineVolume + 5
-		if volume > 100 {
-			volume = 100
-		}
-		return m, commands.CmdSetEngineVolume(m.engine, volume)
-
-	case KeyAutoplay:
-		if m.engineTrack == nil || m.engineTransferred {
-			return m, nil
-		}
-		return m, commands.CmdSetEngineAutoplay(m.engine, !m.engineAutoplay)
-
-	case KeySearchNext:
-		if m.searchCompleted && !m.searchLoading {
-			nextOffset := m.searchOffset + commands.TrackSearchLimit
-			if nextOffset < m.searchTotal {
-				m.searchLoading = true
-				m.searchOffset = nextOffset
-				return m, m.searchTracks(nextOffset)
-			}
-		}
-		return m, nil
-	case KeySearchPrev:
-		if m.searchCompleted && !m.searchLoading {
-			prevOffset := m.searchOffset - commands.TrackSearchLimit
-			if prevOffset >= 0 {
-				m.searchLoading = true
-				m.searchOffset = prevOffset
-				return m, m.searchTracks(prevOffset)
-			}
-		}
-		return m, nil
-	case KeyUp, KeyUpAlt:
-		m.library.MoveUp()
-		return m, nil
-	case KeyDown, KeyDownAlt:
-		m.library.MoveDown()
-		return m, nil
-	case KeyEnter:
-		return m.handleEnter()
-	}
-
 	return m, nil
-}
-
-func (m RootModel) handleEnter() (tea.Model, tea.Cmd) {
-	uri := m.library.SelectedURI()
-	if uri == "" {
-		return m, nil
-	}
-	return m, commands.CmdPlayEngineTrack(m.engine, uri)
-}
-
-func (m RootModel) searchTracks(offset int) tea.Cmd {
-	return commands.CmdSearchEngineTracks(m.engine, m.searchQuery, offset)
 }
 
 func (m RootModel) View() string {
@@ -842,65 +655,5 @@ func (m RootModel) renderMain() string {
 	if m.showHelp {
 		return views.RenderHelpOverlay(m.width, m.height)
 	}
-	if m.browseInitialized {
-		return m.renderBrowseShell()
-	}
-
-	topBar := views.RenderTopBar(m.width)
-	player := views.RenderEnginePlayer(m.width, views.EnginePlayerState{
-		Track:       m.engineTrack,
-		ProgressMS:  m.localProgressMs,
-		Playing:     m.enginePlaying,
-		Buffering:   m.engineBuffering,
-		Active:      m.engineActive,
-		Volume:      m.engineVolume,
-		Autoplay:    m.engineAutoplay,
-		Transferred: m.engineTransferred,
-	})
-
-	topBarH := lipgloss.Height(topBar)
-	playerH := lipgloss.Height(player)
-
-	libraryH := m.height - topBarH - playerH
-	if m.statusMsg != "" {
-		libraryH--
-	}
-	if libraryH < 1 {
-		libraryH = 1
-	}
-
-	libraryContent := m.library.View(m.width, libraryH)
-	if m.searchInputActive {
-		libraryContent = "  " + theme.ActiveTabStyle.Render("Search: "+m.searchQuery)
-	} else if m.searchLoading {
-		loadingText := "Searching tracks..."
-		if m.searchCompleted {
-			loadingText = "Loading more tracks..."
-		}
-		loading := "  " + theme.SubtextStyle.Render(loadingText)
-		if m.library.SearchResultCount() > 0 {
-			libraryContent = lipgloss.JoinVertical(lipgloss.Left, loading, libraryContent)
-		} else {
-			libraryContent = loading
-		}
-	} else if m.searchCompleted && m.library.SearchResultCount() == 0 {
-		libraryContent = "  " + theme.SubtextStyle.Render("No tracks found")
-	}
-	lib := lipgloss.NewStyle().Height(libraryH).Width(m.width).Render(libraryContent)
-
-	rows := []string{topBar, lib}
-
-	if m.statusMsg != "" {
-		var statusLine string
-		if m.statusIsErr {
-			statusLine = theme.ErrorStyle.Render("  ✗ " + m.statusMsg)
-		} else {
-			statusLine = theme.StatusStyle.Render("  " + m.statusMsg)
-		}
-		rows = append(rows, statusLine)
-	}
-
-	rows = append(rows, player)
-
-	return lipgloss.JoinVertical(lipgloss.Left, rows...)
+	return m.renderBrowseShell()
 }

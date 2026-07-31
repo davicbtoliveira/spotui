@@ -5,8 +5,8 @@ package tui
 
 import "github.com/dcbto/spotui/internal/msgs"
 
-type EngineTrackSearchLoadedMsg = msgs.EngineTrackSearchLoadedMsg
 type ErrMsg = msgs.ErrMsg
+type VolumeSetMsg = msgs.VolumeSetMsg
 type ClearStatusMsg = msgs.ClearStatusMsg
 type ProgressTickMsg = msgs.ProgressTickMsg
 type EngineStartedMsg = msgs.EngineStartedMsg

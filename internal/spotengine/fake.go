@@ -12,7 +12,6 @@ const (
 	OperationReconnect     Operation = "reconnect"
 	OperationCancelLogin   Operation = "cancel_login"
 	OperationLogout        Operation = "logout"
-	OperationSearchTracks  Operation = "search_tracks"
 	OperationLikedTracks   Operation = "liked_tracks"
 	OperationUserPlaylists Operation = "user_playlists"
 	OperationSavedAlbums   Operation = "saved_albums"
@@ -53,8 +52,6 @@ type Fake struct {
 	calls           []Call
 	events          chan Event
 	errors          map[Operation]error
-	searchPage      SearchPage
-	searchError     error
 	likedTracks     TrackPage
 	playlists       CatalogPage[PlaylistSummary]
 	albums          CatalogPage[AlbumSummary]
@@ -135,17 +132,6 @@ func (f *Fake) Logout(_ context.Context) error {
 	}
 	f.SetHasSession(false)
 	return nil
-}
-
-func (f *Fake) SearchTracks(_ context.Context, request SearchRequest) (SearchPage, error) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-
-	f.calls = append(f.calls, Call{Operation: OperationSearchTracks, Search: request})
-	if err := f.errors[OperationSearchTracks]; err != nil {
-		return SearchPage{}, err
-	}
-	return f.searchPage, f.searchError
 }
 
 func (f *Fake) LikedTracks(_ context.Context, request PageRequest) (TrackPage, error) {
@@ -288,14 +274,6 @@ func (f *Fake) SeekRelative(_ context.Context, deltaMS int) error {
 
 func (f *Fake) Close(_ context.Context) error {
 	return f.record(Call{Operation: OperationClose})
-}
-
-func (f *Fake) SetSearchResult(page SearchPage, err error) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-
-	f.searchPage = page
-	f.searchError = err
 }
 
 func (f *Fake) SetLikedTracks(page TrackPage) { f.mu.Lock(); defer f.mu.Unlock(); f.likedTracks = page }

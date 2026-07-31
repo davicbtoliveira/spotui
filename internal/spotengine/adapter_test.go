@@ -39,9 +39,29 @@ type lifecycleRuntime struct {
 }
 
 type stubbornRuntime struct {
-	started chan struct{}
-	release chan struct{}
+	started     chan struct{}
+	release     chan struct{}
+	closeCalled chan struct{}
+	closeOnce   sync.Once
 }
+
+type blockedRequestRuntime struct {
+	server   *memoryAPIServer
+	received chan struct{}
+}
+
+func (r *blockedRequestRuntime) Run(ctx context.Context) error {
+	select {
+	case <-r.server.Receive():
+		close(r.received)
+		<-ctx.Done()
+		return ctx.Err()
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+func (*blockedRequestRuntime) Close() error { return nil }
 
 type failingRuntime struct {
 	err error
@@ -53,6 +73,38 @@ func (r failingRuntime) Run(context.Context) error {
 
 func (failingRuntime) Close() error {
 	return nil
+}
+
+func TestAdapterReconnectCancelsInFlightRequest(t *testing.T) {
+	server := newMemoryAPIServer()
+	runtime := &blockedRequestRuntime{server: server, received: make(chan struct{})}
+	adapter := newAdapter(runtime, server)
+
+	if err := adapter.Start(context.Background()); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	requestDone := make(chan error, 1)
+	go func() { requestDone <- adapter.Play(context.Background(), "spotify:track:hello") }()
+	select {
+	case <-runtime.received:
+	case <-time.After(time.Second):
+		t.Fatal("request was not sent to the runtime")
+	}
+
+	if err := adapter.Reconnect(context.Background()); err != nil {
+		t.Fatalf("reconnect: %v", err)
+	}
+	select {
+	case err := <-requestDone:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("in-flight request error: want context canceled, got %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("in-flight request was not canceled")
+	}
+	if err := adapter.Close(context.Background()); err != nil {
+		t.Fatalf("close: %v", err)
+	}
 }
 
 type requestRuntime struct {
@@ -78,7 +130,7 @@ func (r *requestRuntime) Run(ctx context.Context) error {
 	}
 }
 
-func TestAdapterTranslatesTrackSearchResponse(t *testing.T) {
+func TestAdapterSearchTranslatesTrackResults(t *testing.T) {
 	defer goleak.VerifyNone(t, goleak.IgnoreCurrent())
 
 	server := newMemoryAPIServer()
@@ -111,7 +163,7 @@ func TestAdapterTranslatesTrackSearchResponse(t *testing.T) {
 		}
 	}()
 
-	page, err := adapter.SearchTracks(context.Background(), SearchRequest{
+	groups, err := adapter.Search(context.Background(), SearchRequest{
 		Query:  "hello",
 		Offset: 1,
 		Limit:  1,
@@ -119,15 +171,15 @@ func TestAdapterTranslatesTrackSearchResponse(t *testing.T) {
 	if err != nil {
 		t.Fatalf("search tracks: %v", err)
 	}
-	if len(page.Tracks) != 1 {
-		t.Fatalf("tracks: want 1, got %d", len(page.Tracks))
+	if len(groups.Tracks.Items) != 1 {
+		t.Fatalf("tracks: want 1, got %d", len(groups.Tracks.Items))
 	}
-	if got := page.Tracks[0]; got.URI != "spotify:track:hello" || got.Name != "Hello" ||
+	if got := groups.Tracks.Items[0]; got.URI != "spotify:track:hello" || got.Name != "Hello" ||
 		got.Artist != "Adele" || got.Album != "25" || got.DurationMS != 295000 {
 		t.Fatalf("track: %#v", got)
 	}
-	if page.Total != 42 || page.Offset != 1 {
-		t.Fatalf("page: %#v", page)
+	if groups.Tracks.Total != 42 || groups.Tracks.Offset != 1 || !groups.NonTrackUnavailable {
+		t.Fatalf("groups: %#v", groups)
 	}
 
 	request := <-runtime.requests
@@ -308,6 +360,25 @@ func TestAdapterPublishesRuntimeFailure(t *testing.T) {
 	}
 }
 
+func TestAdapterCloseUnblocksRuntimeErrorWhenEventsAreFull(t *testing.T) {
+	defer goleak.VerifyNone(t, goleak.IgnoreCurrent())
+
+	want := errors.New("runtime failed while events were queued")
+	events := make(chan Event, 1)
+	server := newMemoryAPIServerWithEvents(events)
+	server.emit(Event{Type: EventTypeMetadata})
+	adapter := newAdapter(failingRuntime{err: want}, server)
+	if err := adapter.Start(context.Background()); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	if err := adapter.Close(ctx); !errors.Is(err, want) {
+		t.Fatalf("close: want runtime error, got %v", err)
+	}
+}
+
 func (r *requestRuntime) Close() error {
 	return nil
 }
@@ -319,6 +390,9 @@ func (r *stubbornRuntime) Run(context.Context) error {
 }
 
 func (r *stubbornRuntime) Close() error {
+	if r.closeCalled != nil {
+		r.closeOnce.Do(func() { close(r.closeCalled) })
+	}
 	return nil
 }
 
@@ -493,6 +567,84 @@ func TestAdapterReconnectReleasesAttemptBeforeFreshStart(t *testing.T) {
 	}
 	if err := adapter.Close(context.Background()); err != nil {
 		t.Fatalf("close: %v", err)
+	}
+}
+
+func TestAdapterCloseDuringReconnectClosesFreshAttempt(t *testing.T) {
+	defer goleak.VerifyNone(t, goleak.IgnoreCurrent())
+
+	events := make(chan Event, 64)
+	first := &stubbornRuntime{
+		started:     make(chan struct{}),
+		release:     make(chan struct{}),
+		closeCalled: make(chan struct{}),
+	}
+	created := make(chan *stubbornRuntime, 1)
+	adapter := newAdapter(first, newMemoryAPIServerWithEvents(events))
+	adapter.factory = func() (engineRuntime, *memoryAPIServer, error) {
+		runtime := &stubbornRuntime{
+			started:     make(chan struct{}),
+			release:     make(chan struct{}),
+			closeCalled: make(chan struct{}),
+		}
+		created <- runtime
+		return runtime, newMemoryAPIServerWithEvents(events), nil
+	}
+
+	if err := adapter.Start(context.Background()); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	<-first.started
+
+	reconnectDone := make(chan error, 1)
+	go func() { reconnectDone <- adapter.Reconnect(context.Background()) }()
+	select {
+	case <-first.closeCalled:
+	case <-time.After(time.Second):
+		t.Fatal("reconnect did not stop the first runtime")
+	}
+
+	closeDone := make(chan error, 1)
+	go func() { closeDone <- adapter.Close(context.Background()) }()
+	close(first.release)
+	second := <-created
+
+	select {
+	case err := <-reconnectDone:
+		if err != nil {
+			t.Fatalf("reconnect: %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("reconnect did not finish")
+	}
+	select {
+	case err := <-closeDone:
+		if err != nil {
+			t.Fatalf("close during reconnect: %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("close did not finish after reconnect")
+	}
+	select {
+	case <-second.closeCalled:
+	default:
+		t.Fatal("close did not stop the fresh runtime")
+	}
+	select {
+	case _, ok := <-adapter.Events():
+		if !ok {
+			break
+		}
+		select {
+		case _, ok = <-adapter.Events():
+			if ok {
+				t.Fatal("events channel remained open after close")
+			}
+		case <-time.After(time.Second):
+			t.Fatal("events channel remained open after close")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("events channel remained open after close")
 	}
 }
 

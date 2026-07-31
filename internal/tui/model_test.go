@@ -9,6 +9,7 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/dcbto/spotui/internal/catalog"
 	"github.com/dcbto/spotui/internal/msgs"
 	"github.com/dcbto/spotui/internal/spotengine"
 )
@@ -35,6 +36,7 @@ func (c *recoveryClock) Wait(delay time.Duration) tea.Cmd {
 func readyModel(engine *spotengine.Fake) RootModel {
 	m := NewRootModel(engine, func(string) error { return nil })
 	m.state = stateReady
+	m.browseInitialized = true
 	m.width = 90
 	m.height = 24
 	return m
@@ -64,6 +66,19 @@ func TestLoggedOutScreenWaitsForExplicitLogin(t *testing.T) {
 	m = updated.(RootModel)
 	if _, ok := startCmd().(msgs.EngineStartedMsg); !ok || m.state != stateAuthenticating {
 		t.Fatal("Enter did not start Login")
+	}
+}
+
+func TestReadyEventInitializesBrowseRoute(t *testing.T) {
+	engine := spotengine.NewFake()
+	m := NewRootModel(engine, func(string) error { return nil })
+	m.state = stateLoading
+
+	updated, cmd := m.Update(msgs.EngineEventMsg{Event: spotengine.Event{Type: spotengine.EventTypeReady}})
+	m = updated.(RootModel)
+	if m.state != stateReady || !m.browseInitialized || m.browseRoute.Kind != catalog.RouteLiked ||
+		m.browseTitle != "Liked Tracks" || !m.browseLoading || cmd == nil {
+		t.Fatalf("ready transition: state=%v initialized=%v route=%#v title=%q loading=%v cmd=%v", m.state, m.browseInitialized, m.browseRoute, m.browseTitle, m.browseLoading, cmd != nil)
 	}
 }
 
@@ -220,66 +235,6 @@ func TestFreeAccountBlocksPlayerUntilConfirmedLogout(t *testing.T) {
 	}
 }
 
-func TestEngineSearchRendersAndPlaysStableResult(t *testing.T) {
-	engine := spotengine.NewFake()
-	engine.SetSearchResult(spotengine.SearchPage{
-		Tracks: []spotengine.Track{{
-			URI: "spotify:track:hello", Name: "Hello", Artist: "Adele", DurationMS: 295000,
-		}},
-		Total: 1,
-	}, nil)
-	m := readyModel(engine)
-	m.searchQuery = "hello"
-	m.searchInputActive = true
-
-	updated, searchCmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
-	m = updated.(RootModel)
-	updated, _ = m.Update(searchCmd())
-	m = updated.(RootModel)
-	for _, want := range []string{"Hello", "Adele", "04:55"} {
-		if !strings.Contains(m.View(), want) {
-			t.Fatalf("search result missing %q:\n%s", want, m.View())
-		}
-	}
-
-	updated, playCmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
-	m = updated.(RootModel)
-	_ = playCmd()
-	calls := engine.Calls()
-	if len(calls) != 2 || calls[0].Operation != spotengine.OperationSearchTracks ||
-		calls[1].Operation != spotengine.OperationPlay ||
-		calls[1].URI != "spotify:track:hello" {
-		t.Fatalf("engine calls: %#v", calls)
-	}
-}
-
-func TestSearchPaginationAndErrorRemainResponsive(t *testing.T) {
-	engine := spotengine.NewFake()
-	engine.SetSearchResult(spotengine.SearchPage{
-		Tracks: []spotengine.Track{{URI: "spotify:track:page2", Name: "Page Two"}},
-		Total:  30, Offset: 10,
-	}, nil)
-	m := readyModel(engine)
-	m.searchQuery = "hello"
-	m.searchCompleted = true
-	m.searchTotal = 30
-
-	m, nextCmd := key(m, "]")
-	updated, _ := m.Update(nextCmd())
-	m = updated.(RootModel)
-	if m.searchOffset != 10 || !strings.Contains(m.View(), "Page Two") {
-		t.Fatalf("next page failed: offset=%d\n%s", m.searchOffset, m.View())
-	}
-
-	engine.SetError(spotengine.OperationSearchTracks, errors.New("service unavailable"))
-	m, nextCmd = key(m, "]")
-	updated, _ = m.Update(nextCmd())
-	m = updated.(RootModel)
-	if m.searchLoading || !strings.Contains(m.View(), "service unavailable") {
-		t.Fatalf("search error not recoverable:\n%s", m.View())
-	}
-}
-
 func TestPlaybackEventsDrivePlayerAndControls(t *testing.T) {
 	engine := spotengine.NewFake()
 	m := readyModel(engine)
@@ -321,6 +276,44 @@ func TestPlaybackEventsDrivePlayerAndControls(t *testing.T) {
 	}
 	if calls[3].Volume != 70 {
 		t.Fatalf("volume: want 70, got %d", calls[3].Volume)
+	}
+}
+
+func TestRapidVolumeKeysCoalesceToTheLatestTarget(t *testing.T) {
+	engine := spotengine.NewFake()
+	m := readyModel(engine)
+	m.engineVolume = 90
+
+	m, first := key(m, "-")
+	if first == nil {
+		t.Fatal("first volume key did not start a command")
+	}
+	m, second := key(m, "-")
+	if second != nil {
+		t.Fatal("second volume key started a concurrent command")
+	}
+	m, third := key(m, "-")
+	if third != nil {
+		t.Fatal("third volume key started a concurrent command")
+	}
+	if m.engineVolume != 75 {
+		t.Fatalf("optimistic volume = %d, want 75", m.engineVolume)
+	}
+
+	updated, next := m.Update(first())
+	m = updated.(RootModel)
+	if next == nil {
+		t.Fatal("latest volume target was not sent after the first command completed")
+	}
+	updated, final := m.Update(next())
+	m = updated.(RootModel)
+	if final != nil {
+		t.Fatal("volume command remained in flight after reaching the latest target")
+	}
+
+	calls := engine.Calls()
+	if len(calls) != 2 || calls[0].Volume != 85 || calls[1].Volume != 75 {
+		t.Fatalf("volume calls = %#v, want 85 then 75", calls)
 	}
 }
 

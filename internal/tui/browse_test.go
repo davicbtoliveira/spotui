@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/dcbto/spotui/internal/catalog"
 	"github.com/dcbto/spotui/internal/msgs"
 	"github.com/dcbto/spotui/internal/spotengine"
 )
@@ -12,7 +13,7 @@ import (
 func browseReadyModel(engine *spotengine.Fake) RootModel {
 	m := readyModel(engine)
 	m.browseInitialized = true
-	m.browseRoute = "liked"
+	m.browseRoute = catalog.Route{Kind: catalog.RouteLiked}
 	m.browseTitle = "Liked Tracks"
 	m.navCursor = 1
 	m.browseFocus = 1
@@ -22,7 +23,7 @@ func browseReadyModel(engine *spotengine.Fake) RootModel {
 func TestBrowseShellLoadsLikedTracksAndPlaysSelection(t *testing.T) {
 	engine := spotengine.NewFake()
 	m := browseReadyModel(engine)
-	updated, _ := m.Update(msgs.CatalogLoadedMsg{Route: "liked", Data: spotengine.TrackPage{Items: []spotengine.Track{{URI: "spotify:track:hello", Name: "Hello", Artist: "Adele", DurationMS: 1000}}}})
+	updated, _ := m.Update(msgs.CatalogLoadedMsg{Route: catalog.Route{Kind: catalog.RouteLiked}, Payload: catalog.TrackPagePayload{Value: spotengine.TrackPage{Items: []spotengine.Track{{URI: "spotify:track:hello", Name: "Hello", Artist: "Adele", DurationMS: 1000}}}}})
 	m = updated.(RootModel)
 	if !strings.Contains(m.View(), "Liked Tracks") || !strings.Contains(m.View(), "Hello") || !strings.Contains(m.View(), "Library") {
 		t.Fatalf("browse view:\n%s", m.View())
@@ -42,9 +43,9 @@ func TestBrowseShellLoadsLikedTracksAndPlaysSelection(t *testing.T) {
 func TestBrowsePlaylistPreservesContextPlayback(t *testing.T) {
 	engine := spotengine.NewFake()
 	m := browseReadyModel(engine)
-	m.browseRoute = "playlists"
+	m.browseRoute = catalog.Route{Kind: catalog.RoutePlaylists}
 	m.browseTitle = "Playlists"
-	updated, _ := m.Update(msgs.CatalogLoadedMsg{Route: "playlists", Data: spotengine.CatalogPage[spotengine.PlaylistSummary]{Items: []spotengine.PlaylistSummary{{URI: "spotify:playlist:one", Name: "Mix"}}}})
+	updated, _ := m.Update(msgs.CatalogLoadedMsg{Route: catalog.Route{Kind: catalog.RoutePlaylists}, Payload: catalog.PlaylistPagePayload{Value: spotengine.CatalogPage[spotengine.PlaylistSummary]{Items: []spotengine.PlaylistSummary{{URI: "spotify:playlist:one", Name: "Mix"}}}}})
 	m = updated.(RootModel)
 	updated, load := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	m = updated.(RootModel)
@@ -63,19 +64,63 @@ func TestBrowsePlaylistPreservesContextPlayback(t *testing.T) {
 	}
 }
 
+func TestOpeningSearchResetsBrowseCursorBeforeNavigation(t *testing.T) {
+	for _, test := range []struct {
+		name  string
+		setup func(*RootModel)
+		key   tea.KeyMsg
+	}{
+		{
+			name: "navigation tab",
+			setup: func(m *RootModel) {
+				m.browseFocus = 0
+				m.navCursor = 5
+			},
+			key: tea.KeyMsg{Type: tea.KeyEnter},
+		},
+		{
+			name: "search shortcut",
+			setup: func(m *RootModel) {
+				m.browseFocus = 1
+			},
+			key: tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(KeySearch)},
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			engine := spotengine.NewFake()
+			m := readyModel(engine)
+			m.browseCursor = 1
+			m.browseItems = []browseItem{{kind: browseItemTrack, Title: "Stale item"}}
+			test.setup(&m)
+
+			updated, _ := m.Update(test.key)
+			m = updated.(RootModel)
+			if !m.searchInputActive || m.browseFocus != 1 || len(m.browseItems) != 0 {
+				t.Fatalf("search entry state = active:%v focus:%d items:%#v", m.searchInputActive, m.browseFocus, m.browseItems)
+			}
+
+			updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyUp})
+			m = updated.(RootModel)
+			if m.browseCursor != 0 {
+				t.Fatalf("cursor = %d, want 0", m.browseCursor)
+			}
+		})
+	}
+}
+
 func TestBrowseArtistDoesNotRenderEmptyAlbumRows(t *testing.T) {
 	engine := spotengine.NewFake()
 	m := browseReadyModel(engine)
-	m.browseRoute = "artist:spotify:artist:arctic-monkeys"
+	m.browseRoute = catalog.Route{Kind: catalog.RouteArtist, URI: "spotify:artist:arctic-monkeys"}
 	updated, _ := m.Update(msgs.CatalogLoadedMsg{
 		Route: m.browseRoute,
-		Data: spotengine.ArtistDetail{
+		Payload: catalog.ArtistPayload{Value: spotengine.ArtistDetail{
 			ArtistSummary: spotengine.ArtistSummary{Name: "Arctic Monkeys", ImageURL: "https://image.test/arctic"},
 			Albums: []spotengine.AlbumSummary{
 				{URI: "spotify:album:incomplete"},
 				{URI: "spotify:album:am", Name: "AM", Artist: "Arctic Monkeys", ReleaseDate: "2013", TrackCount: 12},
 			},
-		},
+		}},
 	})
 	m = updated.(RootModel)
 	view := m.View()
@@ -90,16 +135,16 @@ func TestBrowseArtistDoesNotRenderEmptyAlbumRows(t *testing.T) {
 func TestBrowseAlbumDoesNotRenderEmptyTrackRows(t *testing.T) {
 	engine := spotengine.NewFake()
 	m := browseReadyModel(engine)
-	m.browseRoute = "album:spotify:album:tranquility-base"
+	m.browseRoute = catalog.Route{Kind: catalog.RouteAlbum, URI: "spotify:album:tranquility-base"}
 	updated, _ := m.Update(msgs.CatalogLoadedMsg{
 		Route: m.browseRoute,
-		Data: spotengine.AlbumDetail{
+		Payload: catalog.AlbumPayload{Value: spotengine.AlbumDetail{
 			AlbumSummary: spotengine.AlbumSummary{Name: "Tranquility Base Hotel & Casino", Artist: "Arctic Monkeys", ReleaseDate: "2018-05-10", TrackCount: 11},
 			Tracks: spotengine.TrackPage{Items: []spotengine.Track{
 				{URI: "spotify:track:incomplete"},
 				{URI: "spotify:track:star-treatment", Name: "Star Treatment", Artist: "Arctic Monkeys", DurationMS: 250000},
 			}},
-		},
+		}},
 	})
 	m = updated.(RootModel)
 	if len(m.browseItems) != 1 || m.browseItems[0].Title != "Star Treatment" {

@@ -8,7 +8,7 @@ import (
 	"github.com/dcbto/spotui/internal/spotengine"
 )
 
-func CmdStartEngine(engine spotengine.Engine) tea.Cmd {
+func CmdStartEngine(engine spotengine.SessionEngine) tea.Cmd {
 	return func() tea.Msg {
 		if err := engine.Start(context.Background()); err != nil {
 			return msgs.EngineStartErrMsg{Err: err}
@@ -17,7 +17,7 @@ func CmdStartEngine(engine spotengine.Engine) tea.Cmd {
 	}
 }
 
-func CmdWaitEngineEvent(engine spotengine.Engine) tea.Cmd {
+func CmdWaitEngineEvent(engine spotengine.EventSource) tea.Cmd {
 	return func() tea.Msg {
 		event, ok := <-engine.Events()
 		if !ok {
@@ -36,7 +36,7 @@ func CmdOpenURL(openURL func(string) error, url string) tea.Cmd {
 	}
 }
 
-func CmdResetLogin(engine spotengine.Engine, clearSession bool) tea.Cmd {
+func CmdResetLogin(engine spotengine.SessionEngine, clearSession bool) tea.Cmd {
 	return func() tea.Msg {
 		var err error
 		if clearSession {
@@ -51,7 +51,7 @@ func CmdResetLogin(engine spotengine.Engine, clearSession bool) tea.Cmd {
 	}
 }
 
-func CmdLogout(engine spotengine.Engine) tea.Cmd {
+func CmdLogout(engine spotengine.SessionEngine) tea.Cmd {
 	return func() tea.Msg {
 		if err := engine.Logout(context.Background()); err != nil {
 			return msgs.LogoutErrMsg{Err: err}
@@ -60,7 +60,7 @@ func CmdLogout(engine spotengine.Engine) tea.Cmd {
 	}
 }
 
-func CmdReconnectEngine(engine spotengine.Engine) tea.Cmd {
+func CmdReconnectEngine(engine spotengine.SessionEngine) tea.Cmd {
 	return func() tea.Msg {
 		if err := engine.Reconnect(context.Background()); err != nil {
 			return msgs.EngineReconnectErrMsg{Err: err}
@@ -69,7 +69,7 @@ func CmdReconnectEngine(engine spotengine.Engine) tea.Cmd {
 	}
 }
 
-func CmdExpireSession(engine spotengine.Engine) tea.Cmd {
+func CmdExpireSession(engine spotengine.SessionEngine) tea.Cmd {
 	return func() tea.Msg {
 		if err := engine.Logout(context.Background()); err != nil {
 			return msgs.SessionExpireErrMsg{Err: err}
@@ -78,7 +78,7 @@ func CmdExpireSession(engine spotengine.Engine) tea.Cmd {
 	}
 }
 
-func CmdPlayEngineTrack(engine spotengine.Engine, uri string) tea.Cmd {
+func CmdPlayEngineTrack(engine spotengine.PlaybackEngine, uri string) tea.Cmd {
 	return func() tea.Msg {
 		if err := engine.Play(context.Background(), uri); err != nil {
 			return msgs.ErrMsg{Err: err, Context: "play track"}
@@ -87,32 +87,32 @@ func CmdPlayEngineTrack(engine spotengine.Engine, uri string) tea.Cmd {
 	}
 }
 
-func CmdPauseEngine(engine spotengine.Engine) tea.Cmd {
+func CmdPauseEngine(engine spotengine.PlaybackEngine) tea.Cmd {
 	return engineControl("pause", engine.Pause)
 }
 
-func CmdResumeEngine(engine spotengine.Engine) tea.Cmd {
+func CmdResumeEngine(engine spotengine.PlaybackEngine) tea.Cmd {
 	return engineControl("resume", engine.Resume)
 }
 
-func CmdNextEngine(engine spotengine.Engine) tea.Cmd {
+func CmdNextEngine(engine spotengine.PlaybackEngine) tea.Cmd {
 	return engineControl("next track", engine.Next)
 }
 
-func CmdPreviousEngine(engine spotengine.Engine) tea.Cmd {
+func CmdPreviousEngine(engine spotengine.PlaybackEngine) tea.Cmd {
 	return engineControl("previous track", engine.Previous)
 }
 
-func CmdSetEngineVolume(engine spotengine.Engine, volume int) tea.Cmd {
+func CmdSetEngineVolume(engine spotengine.PlaybackEngine, volume int) tea.Cmd {
 	return func() tea.Msg {
 		if err := engine.SetVolume(context.Background(), volume); err != nil {
-			return msgs.ErrMsg{Err: err, Context: "set volume"}
+			return msgs.VolumeSetMsg{Volume: volume, Err: err}
 		}
-		return nil
+		return msgs.VolumeSetMsg{Volume: volume}
 	}
 }
 
-func CmdSetEngineAutoplay(engine spotengine.Engine, enabled bool) tea.Cmd {
+func CmdSetEngineAutoplay(engine spotengine.PlaybackEngine, enabled bool) tea.Cmd {
 	return func() tea.Msg {
 		if err := engine.SetAutoplay(context.Background(), enabled); err != nil {
 			return msgs.ErrMsg{Err: err, Context: "set autoplay"}

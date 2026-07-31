@@ -22,24 +22,23 @@ type engineRuntime interface {
 type attemptFactory func() (engineRuntime, *memoryAPIServer, error)
 
 type Adapter struct {
-	runtime               engineRuntime
-	server                *memoryAPIServer
-	factory               attemptFactory
-	clearState            func() error
-	saveAutoplay          func(bool) error
-	sessionAvailable      func() bool
-	events                chan Event
-	hasSession            bool
-	autoplay              bool
-	playlistContextLoader PlaylistContextLoader
-
-	mu         sync.Mutex
-	cancel     context.CancelFunc
-	runDone    chan error
-	stopDone   chan struct{}
-	stopErr    error
-	closed     bool
-	eventsOnce sync.Once
+	runtime          engineRuntime
+	server           *memoryAPIServer
+	factory          attemptFactory
+	clearState       func() error
+	saveAutoplay     func(bool) error
+	sessionAvailable func() bool
+	events           chan Event
+	hasSession       bool
+	autoplay         bool
+	mu               sync.Mutex
+	cancel           context.CancelFunc
+	runContext       context.Context
+	runDone          chan error
+	stopDone         chan struct{}
+	stopErr          error
+	closed           bool
+	eventsOnce       sync.Once
 }
 
 func (a *Adapter) HasSession() bool {
@@ -101,6 +100,7 @@ func (a *Adapter) Start(ctx context.Context) error {
 
 	runCtx, cancel := context.WithCancel(ctx)
 	a.cancel = cancel
+	a.runContext = runCtx
 	a.runDone = make(chan error, 1)
 	runDone := a.runDone
 	runtime := a.runtime
@@ -172,6 +172,13 @@ func (a *Adapter) stop(ctx context.Context, restart, clearState, final bool) err
 			cancel()
 		}
 		go func() {
+			var serverErr error
+			// Close the API boundary before waiting for Run. Runtime callbacks
+			// may be blocked publishing an event; closing the boundary releases
+			// them so the runtime can finish and report through runDone.
+			if server != nil {
+				serverErr = server.Close()
+			}
 			var closeErr error
 			if runtime != nil {
 				closeErr = runtime.Close()
@@ -182,10 +189,6 @@ func (a *Adapter) stop(ctx context.Context, restart, clearState, final bool) err
 			}
 			if errors.Is(runErr, context.Canceled) {
 				runErr = nil
-			}
-			var serverErr error
-			if server != nil {
-				serverErr = server.Close()
 			}
 			stopErr := errors.Join(closeErr, runErr, serverErr)
 			clearSucceeded := !clearState || a.clearState == nil
@@ -207,6 +210,7 @@ func (a *Adapter) stop(ctx context.Context, restart, clearState, final bool) err
 
 			a.mu.Lock()
 			a.cancel = nil
+			a.runContext = nil
 			a.runDone = nil
 			a.stopErr = stopErr
 			if clearState && clearSucceeded {
@@ -220,7 +224,7 @@ func (a *Adapter) stop(ctx context.Context, restart, clearState, final bool) err
 				a.server = nextServer
 			}
 			if restart {
-				a.events <- Event{Type: EventTypeSessionEnded}
+				a.publishSessionEndedLocked()
 			}
 			close(done)
 			a.mu.Unlock()
@@ -233,10 +237,27 @@ func (a *Adapter) stop(ctx context.Context, restart, clearState, final bool) err
 	case <-done:
 		a.mu.Lock()
 		err := a.stopErr
+		closed := a.closed
 		a.mu.Unlock()
+		if final && !closed {
+			if ctx.Err() != nil {
+				return errors.Join(err, ctx.Err())
+			}
+			return errors.Join(err, a.stop(ctx, false, false, true))
+		}
 		return err
 	case <-ctx.Done():
 		return ctx.Err()
+	}
+}
+
+func (a *Adapter) publishSessionEndedLocked() {
+	if a.closed {
+		return
+	}
+	select {
+	case a.events <- Event{Type: EventTypeSessionEnded}:
+	default:
 	}
 }
 
@@ -254,8 +275,28 @@ func (a *Adapter) Events() <-chan Event {
 	return a.events
 }
 
+func (a *Adapter) request(ctx context.Context, requestType daemon.ApiRequestType, data any) (any, error) {
+	a.mu.Lock()
+	server := a.server
+	runContext := a.runContext
+	a.mu.Unlock()
+	if server == nil {
+		return nil, errors.New("playback engine unavailable")
+	}
+	if runContext == nil {
+		return nil, errors.New("playback engine is not running")
+	}
+	requestContext, cancel := context.WithCancel(ctx)
+	stop := context.AfterFunc(runContext, cancel)
+	defer func() {
+		stop()
+		cancel()
+	}()
+	return server.request(requestContext, requestType, data)
+}
+
 func (a *Adapter) Play(ctx context.Context, uri string) error {
-	_, err := a.server.request(ctx, daemon.ApiRequestTypePlay, daemon.ApiRequestDataPlay{
+	_, err := a.request(ctx, daemon.ApiRequestTypePlay, daemon.ApiRequestDataPlay{
 		Uri:       uri,
 		SkipToUri: uri,
 		Position:  0,
@@ -263,28 +304,28 @@ func (a *Adapter) Play(ctx context.Context, uri string) error {
 	return err
 }
 
-func (a *Adapter) SearchTracks(ctx context.Context, request SearchRequest) (SearchPage, error) {
-	response, err := a.server.request(ctx, daemon.ApiRequestTypeSearch, daemon.ApiRequestDataSearch{
+func (a *Adapter) searchTracks(ctx context.Context, request SearchRequest) (TrackPage, error) {
+	response, err := a.request(ctx, daemon.ApiRequestTypeSearch, daemon.ApiRequestDataSearch{
 		Query:  request.Query,
 		Offset: request.Offset,
 		Limit:  request.Limit,
 	})
 	if err != nil {
-		return SearchPage{}, err
+		return TrackPage{}, err
 	}
 
 	searchResponse, ok := response.(daemon.ApiResponseSearch)
 	if !ok {
-		return SearchPage{}, fmt.Errorf("decode track search response: unexpected %T", response)
+		return TrackPage{}, fmt.Errorf("decode track search response: unexpected %T", response)
 	}
 
-	page := SearchPage{
-		Tracks: make([]Track, len(searchResponse.Tracks)),
+	page := TrackPage{
+		Items:  make([]Track, len(searchResponse.Tracks)),
 		Total:  searchResponse.Total,
 		Offset: searchResponse.Offset,
 	}
 	for i, item := range searchResponse.Tracks {
-		page.Tracks[i] = Track{
+		page.Items[i] = Track{
 			URI:        item.Uri,
 			Name:       item.Name,
 			Artist:     strings.Join(item.ArtistNames, ", "),
@@ -333,9 +374,6 @@ func (a *Adapter) SetAutoplay(ctx context.Context, enabled bool) error {
 }
 
 func (a *Adapter) command(ctx context.Context, requestType daemon.ApiRequestType, data any) error {
-	a.mu.Lock()
-	server := a.server
-	a.mu.Unlock()
-	_, err := server.request(ctx, requestType, data)
+	_, err := a.request(ctx, requestType, data)
 	return err
 }

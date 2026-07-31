@@ -3,7 +3,6 @@ package spotengine_test
 import (
 	"context"
 	"errors"
-	"reflect"
 	"testing"
 
 	"github.com/dcbto/spotui/internal/spotengine"
@@ -30,12 +29,6 @@ func TestFakeRecordsPlay(t *testing.T) {
 
 func TestFakeSupportsStableEngineContract(t *testing.T) {
 	engine := spotengine.NewFake()
-	searchPage := spotengine.SearchPage{
-		Tracks: []spotengine.Track{{URI: "spotify:track:hello", Name: "Hello"}},
-		Total:  1,
-		Offset: 20,
-	}
-	engine.SetSearchResult(searchPage, nil)
 
 	ctx := context.Background()
 	if err := engine.Start(ctx); err != nil {
@@ -50,18 +43,6 @@ func TestFakeSupportsStableEngineContract(t *testing.T) {
 	if err := engine.Logout(ctx); err != nil {
 		t.Fatalf("logout: %v", err)
 	}
-	gotPage, err := engine.SearchTracks(ctx, spotengine.SearchRequest{
-		Query:  "hello",
-		Offset: 20,
-		Limit:  20,
-	})
-	if err != nil {
-		t.Fatalf("search tracks: %v", err)
-	}
-	if !reflect.DeepEqual(gotPage, searchPage) {
-		t.Fatalf("search page: want %#v, got %#v", searchPage, gotPage)
-	}
-
 	operations := []struct {
 		name string
 		call func() error
@@ -85,7 +66,6 @@ func TestFakeSupportsStableEngineContract(t *testing.T) {
 		spotengine.OperationReconnect,
 		spotengine.OperationCancelLogin,
 		spotengine.OperationLogout,
-		spotengine.OperationSearchTracks,
 		spotengine.OperationPause,
 		spotengine.OperationResume,
 		spotengine.OperationNext,
@@ -103,7 +83,7 @@ func TestFakeSupportsStableEngineContract(t *testing.T) {
 			t.Fatalf("call %d: want %q, got %q", i, operation, calls[i].Operation)
 		}
 	}
-	if calls[4].Search.Query != "hello" || calls[9].Volume != 65 || calls[10].Enabled {
+	if calls[8].Volume != 65 || calls[9].Enabled {
 		t.Fatalf("recorded arguments: %#v", calls)
 	}
 

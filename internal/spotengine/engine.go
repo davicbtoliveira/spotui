@@ -2,14 +2,17 @@ package spotengine
 
 import "context"
 
-type Engine interface {
+type SessionEngine interface {
 	HasSession() bool
 	AutoplayEnabled() bool
 	Start(context.Context) error
 	Reconnect(context.Context) error
 	CancelLogin(context.Context) error
 	Logout(context.Context) error
-	SearchTracks(context.Context, SearchRequest) (SearchPage, error)
+	Close(context.Context) error
+}
+
+type CatalogEngine interface {
 	LikedTracks(context.Context, PageRequest) (TrackPage, error)
 	UserPlaylists(context.Context, PageRequest) (CatalogPage[PlaylistSummary], error)
 	SavedAlbums(context.Context, PageRequest) (CatalogPage[AlbumSummary], error)
@@ -20,6 +23,9 @@ type Engine interface {
 	TopArtists(context.Context, PageRequest) (CatalogPage[ArtistSummary], error)
 	TopTracks(context.Context, PageRequest) (TrackPage, error)
 	Recommended(context.Context, PageRequest) (RecommendedPage, error)
+}
+
+type PlaybackEngine interface {
 	Play(context.Context, string) error
 	PlayContext(context.Context, string, string, int) error
 	Pause(context.Context) error
@@ -30,18 +36,21 @@ type Engine interface {
 	SetAutoplay(context.Context, bool) error
 	SetShuffle(context.Context, bool) error
 	SeekRelative(context.Context, int) error
+}
+
+type EventSource interface {
 	Events() <-chan Event
-	Close(context.Context) error
+}
+
+type Engine interface {
+	SessionEngine
+	CatalogEngine
+	PlaybackEngine
+	EventSource
 }
 
 type SearchRequest struct {
 	Query  string
 	Offset int
 	Limit  int
-}
-
-type SearchPage struct {
-	Tracks []Track
-	Total  int
-	Offset int
 }
