@@ -10,7 +10,7 @@ import (
 	"github.com/dcbto/spotui/internal/tui/commands"
 )
 
-var navLabels = []string{"Library", "  Liked Tracks", "  Playlists", "  Saved Albums", "Recommended", "Search"}
+var navLabels = []string{"Library", "  Liked Tracks", "  Playlists", "  Saved Albums", "Recommended"}
 
 func (m *RootModel) loadBrowseRoute() tea.Cmd {
 	m.browseLoading = true
@@ -307,9 +307,6 @@ func (m *RootModel) selectNav(index int) tea.Cmd {
 	case 4:
 		m.browseRoute = catalog.Route{Kind: catalog.RouteRecommended}
 		m.browseTitle = "Recommended"
-	case 5:
-		m.browseRoute = catalog.Route{Kind: catalog.RouteSearch, Query: m.searchQuery}
-		m.browseTitle = "Search"
 	}
 	m.browseItems = nil
 	m.browseCursor = 0
@@ -403,7 +400,6 @@ func (m RootModel) handleBrowseKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	if msg.String() == KeySearch {
-		m.navCursor = 5
 		m.browseFocus = 1
 		m.searchInputActive = true
 		m.browseRoute = catalog.Route{Kind: catalog.RouteSearch, Query: m.searchQuery}
@@ -462,14 +458,6 @@ func (m RootModel) handleBrowseKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 		case KeyEnter:
-			if m.navCursor == 5 {
-				m.searchInputActive = true
-				m.searchQuery = ""
-				m.browseItems = nil
-				m.browseCursor = 0
-				m.browseFocus = 1
-				return m, nil
-			}
 			return m, m.selectNav(m.navCursor)
 		}
 		return m, nil

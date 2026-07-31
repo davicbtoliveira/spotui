@@ -71,14 +71,6 @@ func TestOpeningSearchResetsBrowseCursorBeforeNavigation(t *testing.T) {
 		key   tea.KeyMsg
 	}{
 		{
-			name: "navigation tab",
-			setup: func(m *RootModel) {
-				m.browseFocus = 0
-				m.navCursor = 5
-			},
-			key: tea.KeyMsg{Type: tea.KeyEnter},
-		},
-		{
 			name: "search shortcut",
 			setup: func(m *RootModel) {
 				m.browseFocus = 1
@@ -105,6 +97,31 @@ func TestOpeningSearchResetsBrowseCursorBeforeNavigation(t *testing.T) {
 				t.Fatalf("cursor = %d, want 0", m.browseCursor)
 			}
 		})
+	}
+}
+
+func TestSearchIsAvailableOnlyThroughShortcut(t *testing.T) {
+	for _, label := range navLabels {
+		if label == "Search" {
+			t.Fatal("search must not be a navigation tab")
+		}
+	}
+
+	engine := spotengine.NewFake()
+	m := browseReadyModel(engine)
+	m.navCursor = 4
+	m.browseFocus = 0
+
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = updated.(RootModel)
+	if m.searchInputActive || m.browseRoute.Kind != catalog.RouteRecommended || cmd == nil {
+		t.Fatalf("navigation opened search: active=%v route=%v cmd=%v", m.searchInputActive, m.browseRoute.Kind, cmd != nil)
+	}
+
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(KeySearch)})
+	m = updated.(RootModel)
+	if !m.searchInputActive || m.browseRoute.Kind != catalog.RouteSearch || !strings.Contains(m.View(), "Search mode") {
+		t.Fatalf("search shortcut state = active:%v route:%v\n%s", m.searchInputActive, m.browseRoute.Kind, m.View())
 	}
 }
 

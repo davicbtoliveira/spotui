@@ -122,7 +122,7 @@ func renderBrowseContent(state BrowseViewState, width, height int) string {
 		}
 	}
 	if state.Search {
-		rows = append(rows, "  "+theme.SubtextStyle.Render("Search: "+state.SearchQuery))
+		rows = append(rows, "  "+theme.ActiveTabStyle.Render("Search mode")+theme.SubtextStyle.Render(": "+state.SearchQuery))
 	}
 	if state.Loading && len(state.Items) == 0 {
 		return lipgloss.JoinVertical(lipgloss.Left, append(rows, "", "  "+theme.SubtextStyle.Render("Loading..."))...)
