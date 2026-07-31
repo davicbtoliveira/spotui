@@ -263,6 +263,8 @@ func TestPlaybackEventsDrivePlayerAndControls(t *testing.T) {
 	m, cmd = key(m, "p")
 	_ = cmd()
 	m, cmd = key(m, "+")
+	updated, cmd = m.Update(msgs.VolumeDebounceElapsedMsg{Generation: m.volumeDebounceID})
+	m = updated.(RootModel)
 	_ = cmd()
 	want := []spotengine.Operation{
 		spotengine.OperationPause, spotengine.OperationNext,
@@ -283,27 +285,31 @@ func TestRapidVolumeKeysCoalesceToTheLatestTarget(t *testing.T) {
 	engine := spotengine.NewFake()
 	m := readyModel(engine)
 	m.engineVolume = 90
+	m.confirmedEngineVolume = 90
 
 	m, first := key(m, "-")
 	if first == nil {
-		t.Fatal("first volume key did not start a command")
+		t.Fatal("first volume key did not schedule a command")
 	}
 	m, second := key(m, "-")
-	if second != nil {
-		t.Fatal("second volume key started a concurrent command")
+	if second == nil {
+		t.Fatal("second volume key did not replace the pending command")
 	}
 	m, third := key(m, "-")
-	if third != nil {
-		t.Fatal("third volume key started a concurrent command")
+	if third == nil {
+		t.Fatal("third volume key did not replace the pending command")
 	}
 	if m.engineVolume != 75 {
 		t.Fatalf("optimistic volume = %d, want 75", m.engineVolume)
 	}
+	if len(engine.Calls()) != 0 {
+		t.Fatal("volume was sent before the debounce elapsed")
+	}
 
-	updated, next := m.Update(first())
+	updated, next := m.Update(msgs.VolumeDebounceElapsedMsg{Generation: m.volumeDebounceID})
 	m = updated.(RootModel)
 	if next == nil {
-		t.Fatal("latest volume target was not sent after the first command completed")
+		t.Fatal("latest volume target was not sent after the debounce elapsed")
 	}
 	updated, final := m.Update(next())
 	m = updated.(RootModel)
@@ -312,8 +318,61 @@ func TestRapidVolumeKeysCoalesceToTheLatestTarget(t *testing.T) {
 	}
 
 	calls := engine.Calls()
+	if len(calls) != 1 || calls[0].Volume != 75 {
+		t.Fatalf("volume calls = %#v, want only 75", calls)
+	}
+}
+
+func TestVolumeChangeInFlightSendsOnlyTheLatestFollowUpTarget(t *testing.T) {
+	engine := spotengine.NewFake()
+	m := readyModel(engine)
+	m.engineVolume = 90
+	m.confirmedEngineVolume = 90
+
+	m, _ = key(m, "-")
+	updated, firstSet := m.Update(msgs.VolumeDebounceElapsedMsg{Generation: m.volumeDebounceID})
+	m = updated.(RootModel)
+
+	m, _ = key(m, "-")
+	m, _ = key(m, "-")
+	updated, pending := m.Update(msgs.VolumeDebounceElapsedMsg{Generation: m.volumeDebounceID})
+	m = updated.(RootModel)
+	if pending != nil {
+		t.Fatal("volume command started while the previous command was in flight")
+	}
+
+	updated, latestSet := m.Update(firstSet())
+	m = updated.(RootModel)
+	updated, final := m.Update(latestSet())
+	m = updated.(RootModel)
+	if final != nil || m.volumeCommandInFlight {
+		t.Fatal("volume command remained in flight after applying the latest target")
+	}
+
+	calls := engine.Calls()
 	if len(calls) != 2 || calls[0].Volume != 85 || calls[1].Volume != 75 {
 		t.Fatalf("volume calls = %#v, want 85 then 75", calls)
+	}
+}
+
+func TestFailedFinalVolumeChangeRestoresConfirmedVolume(t *testing.T) {
+	engine := spotengine.NewFake()
+	engine.SetError(spotengine.OperationSetVolume, errors.New("engine unavailable"))
+	m := readyModel(engine)
+	m.engineVolume = 65
+	m.confirmedEngineVolume = 65
+
+	m, _ = key(m, "+")
+	updated, setVolume := m.Update(msgs.VolumeDebounceElapsedMsg{Generation: m.volumeDebounceID})
+	m = updated.(RootModel)
+	updated, _ = m.Update(setVolume())
+	m = updated.(RootModel)
+
+	if m.engineVolume != 65 || m.confirmedEngineVolume != 65 {
+		t.Fatalf("volume after failed command = %d (confirmed %d), want 65", m.engineVolume, m.confirmedEngineVolume)
+	}
+	if !m.statusIsErr || !strings.Contains(m.statusMsg, "engine unavailable") {
+		t.Fatalf("missing volume error: %q", m.statusMsg)
 	}
 }
 

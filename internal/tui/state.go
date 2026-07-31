@@ -14,7 +14,10 @@ type playerState struct {
 	engineBuffering       bool
 	engineActive          bool
 	engineVolume          int
+	confirmedEngineVolume int
 	volumeCommandInFlight bool
+	volumeDebouncePending bool
+	volumeDebounceID      uint64
 	engineAutoplay        bool
 	engineShuffle         bool
 	engineTransferred     bool

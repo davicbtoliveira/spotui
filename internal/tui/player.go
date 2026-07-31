@@ -1,9 +1,13 @@
 package tui
 
 import (
+	"time"
+
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/dcbto/spotui/internal/tui/commands"
 )
+
+const volumeDebounceDelay = 35 * time.Millisecond
 
 func (m *RootModel) handlePlaybackKey(msg tea.KeyMsg) (tea.Cmd, bool) {
 	switch msg.String() {
@@ -74,9 +78,7 @@ func (m *RootModel) adjustVolume(delta int) tea.Cmd {
 		return nil
 	}
 	m.engineVolume = volume
-	if m.volumeCommandInFlight {
-		return nil
-	}
-	m.volumeCommandInFlight = true
-	return commands.CmdSetEngineVolume(m.engine, volume)
+	m.volumeDebouncePending = true
+	m.volumeDebounceID++
+	return commands.CmdDebounceVolume(m.volumeDebounceID, volumeDebounceDelay)
 }

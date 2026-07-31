@@ -77,8 +77,9 @@ func NewRootModelWithRecovery(
 		engine:  engine,
 		openURL: openURL,
 		playerState: playerState{
-			engineVolume:   100,
-			engineAutoplay: engine.AutoplayEnabled(),
+			engineVolume:          100,
+			confirmedEngineVolume: 100,
+			engineAutoplay:        engine.AutoplayEnabled(),
 		},
 		browseState: browseState{
 			navCursor:      0,
@@ -215,12 +216,13 @@ func (m RootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.engineBuffering = false
 			m.engineTransferred = true
 		case spotengine.EventTypeVolume:
-			if !m.volumeCommandInFlight {
+			if !m.volumeCommandInFlight && !m.volumeDebouncePending {
 				if msg.Event.VolumeMax > 0 {
 					m.engineVolume = msg.Event.Volume * 100 / msg.Event.VolumeMax
 				} else {
 					m.engineVolume = msg.Event.Volume
 				}
+				m.confirmedEngineVolume = m.engineVolume
 			}
 		case spotengine.EventTypeSessionEnded:
 			if m.state == stateLoggedOut || m.state == stateCancelling || m.state == stateUnsupported {
@@ -354,17 +356,40 @@ func (m RootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, commands.CmdProgressTick()
 
+	case VolumeDebounceElapsedMsg:
+		if msg.Generation != m.volumeDebounceID {
+			return m, nil
+		}
+		m.volumeDebouncePending = false
+		if m.volumeCommandInFlight {
+			return m, nil
+		}
+		m.volumeCommandInFlight = true
+		return m, commands.CmdSetEngineVolume(m.engine, m.engineVolume)
+
 	case VolumeSetMsg:
+		m.volumeCommandInFlight = false
 		if msg.Err != nil {
-			m.volumeCommandInFlight = false
+			if m.engineVolume != msg.Volume {
+				if m.volumeDebouncePending {
+					return m, nil
+				}
+				m.volumeCommandInFlight = true
+				return m, commands.CmdSetEngineVolume(m.engine, m.engineVolume)
+			}
+			m.engineVolume = m.confirmedEngineVolume
 			m.statusMsg = "set volume: " + msg.Err.Error()
 			m.statusIsErr = true
 			return m, commands.CmdClearStatus()
 		}
+		m.confirmedEngineVolume = msg.Volume
+		if m.volumeDebouncePending {
+			return m, nil
+		}
 		if m.engineVolume != msg.Volume {
+			m.volumeCommandInFlight = true
 			return m, commands.CmdSetEngineVolume(m.engine, m.engineVolume)
 		}
-		m.volumeCommandInFlight = false
 		return m, nil
 
 	case ErrMsg:
@@ -405,6 +430,10 @@ func (m *RootModel) clearAccount() {
 	m.engineActive = false
 	m.engineTransferred = false
 	m.engineVolume = 100
+	m.confirmedEngineVolume = 100
+	m.volumeCommandInFlight = false
+	m.volumeDebouncePending = false
+	m.volumeDebounceID++
 	m.engineAutoplay = m.engine.AutoplayEnabled()
 	m.engineShuffle = false
 	m.searchInputActive = false

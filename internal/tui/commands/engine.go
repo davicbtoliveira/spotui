@@ -2,6 +2,7 @@ package commands
 
 import (
 	"context"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/dcbto/spotui/internal/msgs"
@@ -110,6 +111,12 @@ func CmdSetEngineVolume(engine spotengine.PlaybackEngine, volume int) tea.Cmd {
 		}
 		return msgs.VolumeSetMsg{Volume: volume}
 	}
+}
+
+func CmdDebounceVolume(generation uint64, delay time.Duration) tea.Cmd {
+	return tea.Tick(delay, func(time.Time) tea.Msg {
+		return msgs.VolumeDebounceElapsedMsg{Generation: generation}
+	})
 }
 
 func CmdSetEngineAutoplay(engine spotengine.PlaybackEngine, enabled bool) tea.Cmd {

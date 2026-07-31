@@ -7,6 +7,7 @@ import "github.com/dcbto/spotui/internal/msgs"
 
 type ErrMsg = msgs.ErrMsg
 type VolumeSetMsg = msgs.VolumeSetMsg
+type VolumeDebounceElapsedMsg = msgs.VolumeDebounceElapsedMsg
 type ClearStatusMsg = msgs.ClearStatusMsg
 type ProgressTickMsg = msgs.ProgressTickMsg
 type EngineStartedMsg = msgs.EngineStartedMsg

@@ -27,6 +27,10 @@ type VolumeSetMsg struct {
 	Err    error
 }
 
+type VolumeDebounceElapsedMsg struct {
+	Generation uint64
+}
+
 type ClearStatusMsg struct{}
 
 type ProgressTickMsg struct{}
