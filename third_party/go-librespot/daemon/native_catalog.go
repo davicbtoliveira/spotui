@@ -525,7 +525,7 @@ func nativeSearchPlaylists(ctx context.Context, client *spclient.Spclient, reque
 
 func nativeRecommendedPlaylists(ctx context.Context, client *spclient.Spclient, request ApiRequestDataNativeCatalog) (any, error) {
 	result, err := nativePathfinderQuery(ctx, client, pathfinderHome, map[string]any{
-		"homeEndUserIntegration": "", "timeZone": "", "sp_t": "", "facet": "",
+		"homeEndUserIntegration": "INTEGRATION_WEB_PLAYER", "timeZone": "", "sp_t": "", "facet": "",
 		"sectionItemsLimit": request.Limit, "includeEpisodeContentRatingsV2": false,
 	})
 	if err != nil {

@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -259,6 +260,33 @@ func TestHomePlaylistPagePreservesSpotifyShelfOrder(t *testing.T) {
 	items := page["items"].([]any)
 	if len(items) != 2 || items[0].(map[string]any)["uri"] != "spotify:playlist:personal" || items[1].(map[string]any)["uri"] != "spotify:playlist:editorial" {
 		t.Fatalf("home playlists: %#v", items)
+	}
+}
+
+func TestNativeRecommendedPlaylistsUseWebPlayerIntegration(t *testing.T) {
+	client, err := spclient.NewSpclient(context.Background(), &librespot.NullLogger{}, &http.Client{Transport: roundTripperFunc(func(request *http.Request) (*http.Response, error) {
+		if request.URL.Host != "api-partner.spotify.com" || request.URL.Query().Get("operationName") != "home" {
+			t.Fatalf("request: %s", request.URL)
+		}
+		var variables map[string]any
+		if err := json.Unmarshal([]byte(request.URL.Query().Get("variables")), &variables); err != nil {
+			t.Fatal(err)
+		}
+		if variables["homeEndUserIntegration"] != "INTEGRATION_WEB_PLAYER" {
+			t.Fatalf("home integration: %#v", variables["homeEndUserIntegration"])
+		}
+		return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(`{"data":{"home":{}}}`))}, nil
+	})}, func(context.Context) string {
+		return "spclient.wg.spotify.com"
+	}, func(context.Context, bool) (string, error) {
+		return "token", nil
+	}, "device", "client-token")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := nativeRecommendedPlaylists(context.Background(), client, ApiRequestDataNativeCatalog{Limit: 10}); err != nil {
+		t.Fatal(err)
 	}
 }
 

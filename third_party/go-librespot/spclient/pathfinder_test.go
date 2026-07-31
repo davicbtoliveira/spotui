@@ -24,6 +24,9 @@ func TestPathfinderQueryUsesAuthenticatedPersistedQuery(t *testing.T) {
 		if request.Header.Get("Authorization") != "Bearer access-token" || request.Header.Get("Client-Token") != "client-token" {
 			t.Fatalf("authorization headers: %#v", request.Header)
 		}
+		if request.Header.Get("Origin") != "https://open.spotify.com" || request.Header.Get("Referer") != "https://open.spotify.com/" || request.Header.Get("User-Agent") == "" || request.Header.Get("Accept-Language") == "" {
+			t.Fatalf("web player headers: %#v", request.Header)
+		}
 		if request.URL.Query().Get("operationName") != "queryArtistPlaylists" || !strings.Contains(request.URL.Query().Get("variables"), "spotify:artist:arctic") || !strings.Contains(request.URL.Query().Get("extensions"), "persistedQuery") {
 			t.Fatalf("query: %s", request.URL.RawQuery)
 		}
