@@ -390,10 +390,16 @@ func (m RootModel) handleBrowseKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	if msg.Type == tea.KeyTab || msg.String() == "tab" {
 		m.browseFocus = 1 - m.browseFocus
+		if m.browseFocus == 0 {
+			m.searchInputActive = false
+		}
 		return m, nil
 	}
 	if msg.String() == "shift+tab" {
 		m.browseFocus = 1 - m.browseFocus
+		if m.browseFocus == 0 {
+			m.searchInputActive = false
+		}
 		return m, nil
 	}
 	if msg.String() == KeySearch {

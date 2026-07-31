@@ -108,6 +108,27 @@ func TestOpeningSearchResetsBrowseCursorBeforeNavigation(t *testing.T) {
 	}
 }
 
+func TestNavigationTabOpensWhileSearchInputIsActive(t *testing.T) {
+	engine := spotengine.NewFake()
+	m := browseReadyModel(engine)
+	m.navCursor = 4
+	m.browseFocus = 1
+	m.searchInputActive = true
+	m.browseRoute = catalog.Route{Kind: catalog.RouteSearch}
+
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyTab})
+	m = updated.(RootModel)
+	if m.browseFocus != 0 || m.searchInputActive {
+		t.Fatalf("Tab did not return focus to navigation: focus=%d searchActive=%v", m.browseFocus, m.searchInputActive)
+	}
+
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = updated.(RootModel)
+	if cmd == nil || m.browseRoute.Kind != catalog.RouteRecommended || !m.browseLoading {
+		t.Fatalf("Enter did not open navigation tab: route=%v loading=%v cmd=%v", m.browseRoute.Kind, m.browseLoading, cmd != nil)
+	}
+}
+
 func TestBrowseArtistDoesNotRenderEmptyAlbumRows(t *testing.T) {
 	engine := spotengine.NewFake()
 	m := browseReadyModel(engine)
