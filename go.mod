@@ -62,4 +62,4 @@ require (
 
 replace github.com/devgianlu/go-librespot => ./third_party/go-librespot
 
-replace github.com/jfreymuth/pulse => github.com/davicbtoliveira/pulse v0.1.3-0.20260730183401-82efa3cf17f7
+replace github.com/jfreymuth/pulse => ./third_party/pulse

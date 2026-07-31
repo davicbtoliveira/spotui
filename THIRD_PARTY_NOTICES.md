@@ -35,7 +35,9 @@ SpotUI uses a patched PulseAudio client through go-librespot.
 
 The fork prevents playback restarts from waiting forever when a PulseAudio
 server, including WSLg, omits its started event after an underflow. See commits
-`5c744c2` and `82efa3c`.
+`5c744c2` and `82efa3c`. SpotUI carries the exact modified source under
+`third_party/pulse`; its event handler also treats a transient sink-input query
+timeout as non-fatal, so a delayed PulseAudio response cannot panic the app.
 
 The repository also carries the exact go-librespot fork source under
 `third_party/go-librespot`. SpotUI adds the `ApiRequestTypeNativeCatalog`
