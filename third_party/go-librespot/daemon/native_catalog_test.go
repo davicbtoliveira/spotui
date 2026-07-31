@@ -5,6 +5,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	librespot "github.com/devgianlu/go-librespot"
@@ -14,6 +15,12 @@ import (
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/anypb"
 )
+
+type roundTripperFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripperFunc) RoundTrip(request *http.Request) (*http.Response, error) {
+	return f(request)
+}
 
 func TestNativeArtistHydratesAlbumGroupEntries(t *testing.T) {
 	artistGID := make([]byte, 16)
@@ -77,7 +84,13 @@ func TestNativeArtistHydratesAlbumGroupEntries(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client, err := spclient.NewSpclient(context.Background(), &librespot.NullLogger{}, server.Client(), func(context.Context) string {
+	serverClient := server.Client()
+	client, err := spclient.NewSpclient(context.Background(), &librespot.NullLogger{}, &http.Client{Transport: roundTripperFunc(func(request *http.Request) (*http.Response, error) {
+		if request.URL.Host == "api-partner.spotify.com" {
+			return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(`{"data":{"artistUnion":{"profile":{"playlistsV2":{"items":[{"uri":"spotify:playlist:indie","name":"Indie Forever","ownerV2":{"data":{"name":"Spotify"}}}]}}}}}`))}, nil
+		}
+		return serverClient.Transport.RoundTrip(request)
+	})}, func(context.Context) string {
 		return server.Listener.Addr().String()
 	}, func(context.Context, bool) (string, error) {
 		return "token", nil
@@ -98,6 +111,10 @@ func TestNativeArtistHydratesAlbumGroupEntries(t *testing.T) {
 	album := albums[0].(map[string]any)
 	if album["uri"] != albumURI || album["name"] != "AM" || album["total_tracks"] != 1 {
 		t.Fatalf("album summary: %#v", album)
+	}
+	playlists := response["playlists"].(map[string]any)["items"].([]any)
+	if len(playlists) != 1 || playlists[0].(map[string]any)["uri"] != "spotify:playlist:indie" {
+		t.Fatalf("playlists: %#v", playlists)
 	}
 }
 
@@ -200,6 +217,48 @@ func TestTrackValuePreservesProvidedURI(t *testing.T) {
 	value := trackValue(&metadatapb.Track{Gid: metadataGID, Name: stringPointer("Track")}, providedURI, "")
 	if value["uri"] != providedURI {
 		t.Fatalf("track URI: got %v, want %s", value["uri"], providedURI)
+	}
+}
+
+func TestPathfinderPlaylistPageNormalizesSearchPlaylist(t *testing.T) {
+	page := pathfinderPlaylistPage(map[string]any{
+		"searchV2": map[string]any{
+			"topResultsV2": map[string]any{
+				"itemsV2": []any{map[string]any{
+					"data": map[string]any{
+						"uri":     "spotify:playlist:indie",
+						"name":    "Indie Forever",
+						"ownerV2": map[string]any{"data": map[string]any{"name": "Spotify"}},
+						"images":  map[string]any{"items": []any{map[string]any{"sources": []any{map[string]any{"url": "https://image.test/indie"}}}}},
+					},
+				}},
+			},
+		},
+	}, ApiRequestDataNativeCatalog{Offset: 0, Limit: 10})
+	items := page.(map[string]any)["items"].([]any)
+	if len(items) != 1 {
+		t.Fatalf("items: %#v", items)
+	}
+	playlist := items[0].(map[string]any)
+	if playlist["uri"] != "spotify:playlist:indie" || playlist["name"] != "Indie Forever" || playlist["owner"].(map[string]any)["name"] != "Spotify" {
+		t.Fatalf("playlist: %#v", playlist)
+	}
+}
+
+func TestHomePlaylistPagePreservesSpotifyShelfOrder(t *testing.T) {
+	page := homePlaylistPage(map[string]any{
+		"home": map[string]any{
+			"sectionContainer": map[string]any{
+				"sections": map[string]any{"items": []any{
+					map[string]any{"items": []any{map[string]any{"data": map[string]any{"uri": "spotify:playlist:personal", "name": "Personal"}}}},
+					map[string]any{"items": []any{map[string]any{"data": map[string]any{"uri": "spotify:playlist:editorial", "name": "Editorial"}}}},
+				}},
+			},
+		},
+	}, ApiRequestDataNativeCatalog{Limit: 10}).(map[string]any)
+	items := page["items"].([]any)
+	if len(items) != 2 || items[0].(map[string]any)["uri"] != "spotify:playlist:personal" || items[1].(map[string]any)["uri"] != "spotify:playlist:editorial" {
+		t.Fatalf("home playlists: %#v", items)
 	}
 }
 

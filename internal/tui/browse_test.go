@@ -170,6 +170,41 @@ func TestBrowseArtistDoesNotRenderEmptyAlbumRows(t *testing.T) {
 	}
 }
 
+func TestBrowseArtistRendersPublicPlaylists(t *testing.T) {
+	engine := spotengine.NewFake()
+	m := browseReadyModel(engine)
+	m.browseRoute = catalog.Route{Kind: catalog.RouteArtist, URI: "spotify:artist:arctic-monkeys"}
+	updated, _ := m.Update(msgs.CatalogLoadedMsg{
+		Route: m.browseRoute,
+		Payload: catalog.ArtistPayload{Value: spotengine.ArtistDetail{
+			ArtistSummary: spotengine.ArtistSummary{Name: "Arctic Monkeys"},
+			Playlists:     []spotengine.PlaylistSummary{{URI: "spotify:playlist:indie", Name: "Indie Forever", Owner: "Spotify", TrackCount: 50}},
+		}},
+	})
+	m = updated.(RootModel)
+	view := m.View()
+	if !strings.Contains(view, "Playlists featuring this artist") || !strings.Contains(view, "Indie Forever") {
+		t.Fatalf("artist view lost playlists:\n%s", view)
+	}
+}
+
+func TestBrowseRecommendedRendersPublicPlaylists(t *testing.T) {
+	engine := spotengine.NewFake()
+	m := browseReadyModel(engine)
+	m.browseRoute = catalog.Route{Kind: catalog.RouteRecommended}
+	updated, _ := m.Update(msgs.CatalogLoadedMsg{
+		Route: m.browseRoute,
+		Payload: catalog.RecommendedPayload{Value: spotengine.RecommendedPage{
+			Playlists: []spotengine.PlaylistSummary{{URI: "spotify:playlist:discover", Name: "Discover Weekly", Owner: "Spotify", TrackCount: 30}},
+		}},
+	})
+	m = updated.(RootModel)
+	view := m.View()
+	if !strings.Contains(view, "Recommended playlists") || !strings.Contains(view, "Discover Weekly") {
+		t.Fatalf("recommended view lost playlists:\n%s", view)
+	}
+}
+
 func TestBrowseAlbumDoesNotRenderEmptyTrackRows(t *testing.T) {
 	engine := spotengine.NewFake()
 	m := browseReadyModel(engine)

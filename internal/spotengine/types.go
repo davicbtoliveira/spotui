@@ -91,9 +91,11 @@ type ArtistSummary struct {
 
 type ArtistDetail struct {
 	ArtistSummary
-	Genres  []string
-	Popular TrackPage
-	Albums  []AlbumSummary
+	Genres               []string
+	Popular              TrackPage
+	Albums               []AlbumSummary
+	Playlists            []PlaylistSummary
+	PlaylistsUnavailable bool
 }
 
 type CatalogPage[T any] struct {
@@ -104,19 +106,21 @@ type CatalogPage[T any] struct {
 }
 
 type SearchGroups struct {
-	Tracks              TrackPage
-	Albums              CatalogPage[AlbumSummary]
-	Artists             CatalogPage[ArtistSummary]
-	Playlists           CatalogPage[PlaylistSummary]
-	NonTrackUnavailable bool
+	Tracks                      TrackPage
+	Albums                      CatalogPage[AlbumSummary]
+	Artists                     CatalogPage[ArtistSummary]
+	Playlists                   CatalogPage[PlaylistSummary]
+	AlbumsAndArtistsUnavailable bool
+	PlaylistsUnavailable        bool
 }
 
 type RecommendedPage struct {
-	Artists           CatalogPage[ArtistSummary]
-	Tracks            TrackPage
-	Albums            []AlbumSummary
-	Playlists         []PlaylistSummary
-	TracksUnavailable bool
+	Artists              CatalogPage[ArtistSummary]
+	Tracks               TrackPage
+	Albums               []AlbumSummary
+	Playlists            []PlaylistSummary
+	TracksUnavailable    bool
+	PlaylistsUnavailable bool
 }
 
 type Event struct {

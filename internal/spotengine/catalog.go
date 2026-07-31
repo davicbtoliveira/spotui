@@ -193,17 +193,15 @@ func (a *Adapter) SavedAlbums(ctx context.Context, request PageRequest) (Catalog
 }
 
 func (a *Adapter) Search(ctx context.Context, request SearchRequest) (SearchGroups, error) {
-	trackPage, err := a.searchTracks(ctx, request)
-	if err != nil {
+	var response struct {
+		Tracks               spotifyPage `json:"tracks"`
+		Playlists            spotifyPage `json:"playlists"`
+		PlaylistsUnavailable bool        `json:"playlists_unavailable"`
+	}
+	if err := a.nativeCatalogGet(ctx, daemon.ApiRequestDataNativeCatalog{Kind: "search", Query: request.Query, Offset: max(0, request.Offset), Limit: request.Limit}, &response); err != nil {
 		return SearchGroups{}, err
 	}
-	// Native search currently exposes track results. Returning the explicit
-	// unavailable marker keeps the other groups honest and, importantly, never
-	// falls back to the quota-bound public Web API.
-	return SearchGroups{
-		Tracks:              trackPage,
-		NonTrackUnavailable: true,
-	}, nil
+	return SearchGroups{Tracks: translateTrackPage(response.Tracks), Playlists: translatePlaylistPage(response.Playlists), AlbumsAndArtistsUnavailable: true, PlaylistsUnavailable: response.PlaylistsUnavailable}, nil
 }
 
 func translateTrackPage(response spotifyPage) TrackPage {
@@ -232,6 +230,17 @@ func translateArtistPage(response spotifyPage) CatalogPage[ArtistSummary] {
 		var value spotifyArtist
 		if json.Unmarshal(raw, &value) == nil {
 			page.Items = append(page.Items, translateArtist(value))
+		}
+	}
+	return page
+}
+
+func translatePlaylistPage(response spotifyPage) CatalogPage[PlaylistSummary] {
+	page := CatalogPage[PlaylistSummary]{Total: response.Total, Offset: response.Offset, Limit: response.Limit}
+	for _, raw := range response.Items {
+		var value spotifyPlaylist
+		if json.Unmarshal(raw, &value) == nil {
+			page.Items = append(page.Items, translatePlaylist(value))
 		}
 	}
 	return page
@@ -270,15 +279,18 @@ func (a *Adapter) Album(ctx context.Context, uri string, request PageRequest) (A
 
 func (a *Adapter) Artist(ctx context.Context, uri string, request PageRequest) (ArtistDetail, error) {
 	var response struct {
-		Artist  spotifyArtist `json:"artist"`
-		Genres  []string      `json:"genres"`
-		Popular spotifyPage   `json:"popular"`
-		Albums  spotifyPage   `json:"albums"`
+		Artist               spotifyArtist `json:"artist"`
+		Genres               []string      `json:"genres"`
+		Popular              spotifyPage   `json:"popular"`
+		Albums               spotifyPage   `json:"albums"`
+		Playlists            spotifyPage   `json:"playlists"`
+		PlaylistsUnavailable bool          `json:"playlists_unavailable"`
 	}
 	if err := a.nativeCatalogGet(ctx, daemon.ApiRequestDataNativeCatalog{Kind: "artist", URI: uri, Offset: max(0, request.Offset), Limit: request.Limit}, &response); err != nil {
 		return ArtistDetail{}, err
 	}
-	return ArtistDetail{ArtistSummary: translateArtist(response.Artist), Genres: response.Genres, Popular: translateTrackPage(response.Popular), Albums: translateAlbumPage(response.Albums).Items}, nil
+	detail := ArtistDetail{ArtistSummary: translateArtist(response.Artist), Genres: response.Genres, Popular: translateTrackPage(response.Popular), Albums: translateAlbumPage(response.Albums).Items, Playlists: translatePlaylistPage(response.Playlists).Items, PlaylistsUnavailable: response.PlaylistsUnavailable}
+	return detail, nil
 }
 
 func (a *Adapter) TopArtists(ctx context.Context, request PageRequest) (CatalogPage[ArtistSummary], error) {
@@ -302,11 +314,19 @@ func (a *Adapter) Recommended(ctx context.Context, request PageRequest) (Recomme
 	if err != nil {
 		return RecommendedPage{}, err
 	}
+	page := RecommendedPage{Artists: artists}
 	tracks, err := a.TopTracks(ctx, request)
 	if err != nil {
-		return RecommendedPage{Artists: artists, TracksUnavailable: true}, nil
+		page.TracksUnavailable = true
+	} else {
+		page.Tracks = tracks
 	}
-	page := RecommendedPage{Artists: artists, Tracks: tracks}
+	var playlists spotifyPage
+	if err := a.nativeCatalogGet(ctx, daemon.ApiRequestDataNativeCatalog{Kind: "recommended_playlists", Offset: max(0, request.Offset), Limit: request.Limit}, &playlists); err != nil {
+		page.PlaylistsUnavailable = true
+	} else {
+		page.Playlists = translatePlaylistPage(playlists).Items
+	}
 	seenAlbums := make(map[string]bool)
 	for _, track := range tracks.Items {
 		if track.AlbumURI != "" && !seenAlbums[track.AlbumURI] {

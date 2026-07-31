@@ -165,7 +165,7 @@ func (m *RootModel) applyCatalogMessage(msg CatalogLoadedMsg) tea.Cmd {
 		value := payload.Value
 		m.browseTitle = value.Name
 		m.browseMeta = strings.Join(value.Genres, " · ")
-		m.browseItems = make([]browseItem, 0, len(value.Popular.Items)+len(value.Albums)+1)
+		m.browseItems = make([]browseItem, 0, len(value.Popular.Items)+len(value.Albums)+len(value.Playlists)+2)
 		if value.ImageURL != "" {
 			m.browseItems = append(m.browseItems, browseItem{kind: browseItemHeader, Title: "Artist artwork", ImageURL: value.ImageURL})
 		}
@@ -180,6 +180,19 @@ func (m *RootModel) applyCatalogMessage(msg CatalogLoadedMsg) tea.Cmd {
 				continue
 			}
 			m.browseItems = append(m.browseItems, albumItem(item))
+		}
+		if len(value.Playlists) > 0 || value.PlaylistsUnavailable {
+			title := "Playlists featuring this artist"
+			if value.PlaylistsUnavailable {
+				title += " (unavailable)"
+			}
+			m.browseItems = append(m.browseItems, browseItem{kind: browseItemHeader, Title: title})
+		}
+		for _, item := range value.Playlists {
+			if item.Name == "" {
+				continue
+			}
+			m.browseItems = append(m.browseItems, playlistItem(item))
 		}
 	}
 	cacheMsg := msg
@@ -221,21 +234,21 @@ func searchItems(groups spotengine.SearchGroups) []browseItem {
 		i.Subtitle = "Track · " + i.Subtitle
 		items = append(items, i)
 	}
-	items = append(items, browseItem{kind: browseItemHeader, Title: searchGroupTitle("Albums", groups.Albums.Total, groups.NonTrackUnavailable)})
+	items = append(items, browseItem{kind: browseItemHeader, Title: searchGroupTitle("Albums", groups.Albums.Total, groups.AlbumsAndArtistsUnavailable)})
 	for _, item := range groups.Albums.Items {
 		i := albumItem(item)
 		i.Subtitle = "Album · " + i.Subtitle
 		items = append(items, i)
 	}
 
-	items = append(items, browseItem{kind: browseItemHeader, Title: searchGroupTitle("Artists", groups.Artists.Total, groups.NonTrackUnavailable)})
+	items = append(items, browseItem{kind: browseItemHeader, Title: searchGroupTitle("Artists", groups.Artists.Total, groups.AlbumsAndArtistsUnavailable)})
 	for _, item := range groups.Artists.Items {
 		i := artistItem(item)
 		i.Subtitle = "Artist"
 		items = append(items, i)
 	}
 	// Playlists are the final search group.
-	items = append(items, browseItem{kind: browseItemHeader, Title: searchGroupTitle("Playlists", groups.Playlists.Total, groups.NonTrackUnavailable)})
+	items = append(items, browseItem{kind: browseItemHeader, Title: searchGroupTitle("Playlists", groups.Playlists.Total, groups.PlaylistsUnavailable)})
 	for _, item := range groups.Playlists.Items {
 		i := playlistItem(item)
 		i.Subtitle = "Playlist · " + i.Subtitle
@@ -275,7 +288,11 @@ func recommendedItems(value spotengine.RecommendedPage) []browseItem {
 	for _, album := range value.Albums {
 		items = append(items, albumItem(album))
 	}
-	items = append(items, browseItem{kind: browseItemHeader, Title: fmt.Sprintf("Playlists from top artists (%d)", len(value.Playlists))})
+	playlistTitle := fmt.Sprintf("Recommended playlists (%d)", len(value.Playlists))
+	if value.PlaylistsUnavailable {
+		playlistTitle = "Recommended playlists (unavailable)"
+	}
+	items = append(items, browseItem{kind: browseItemHeader, Title: playlistTitle})
 	for _, playlist := range value.Playlists {
 		items = append(items, playlistItem(playlist))
 	}

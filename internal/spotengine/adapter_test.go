@@ -3,6 +3,7 @@ package spotengine
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"testing"
 	"time"
@@ -137,20 +138,12 @@ func TestAdapterSearchTranslatesTrackResults(t *testing.T) {
 	runtime := &requestRuntime{
 		server:   server,
 		requests: make(chan daemon.ApiRequest, 1),
-		reply: func(daemon.ApiRequest) (any, error) {
-			return daemon.ApiResponseSearch{
-				Tracks: []daemon.ApiResponseSearchTrack{
-					{
-						Uri:         "spotify:track:hello",
-						Name:        "Hello",
-						ArtistNames: []string{"Adele"},
-						AlbumName:   "25",
-						Duration:    295000,
-					},
-				},
-				Total:  42,
-				Offset: 1,
-			}, nil
+		reply: func(request daemon.ApiRequest) (any, error) {
+			data, ok := request.Data.(daemon.ApiRequestDataNativeCatalog)
+			if request.Type != daemon.ApiRequestTypeNativeCatalog || !ok || data.Kind != "search" {
+				return nil, fmt.Errorf("catalog request: %#v", request)
+			}
+			return daemon.ApiResponseNativeCatalog{Payload: []byte(`{"tracks":{"items":[{"uri":"spotify:track:hello","name":"Hello","duration_ms":295000,"artists":[{"name":"Adele"}],"album":{"name":"25"}}],"total":42,"offset":1,"limit":1},"playlists":{"items":[]},"playlists_unavailable":true}`)}, nil
 		},
 	}
 	adapter := newAdapter(runtime, server)
@@ -178,16 +171,16 @@ func TestAdapterSearchTranslatesTrackResults(t *testing.T) {
 		got.Artist != "Adele" || got.Album != "25" || got.DurationMS != 295000 {
 		t.Fatalf("track: %#v", got)
 	}
-	if groups.Tracks.Total != 42 || groups.Tracks.Offset != 1 || !groups.NonTrackUnavailable {
+	if groups.Tracks.Total != 42 || groups.Tracks.Offset != 1 || !groups.AlbumsAndArtistsUnavailable {
 		t.Fatalf("groups: %#v", groups)
 	}
 
 	request := <-runtime.requests
-	data, ok := request.Data.(daemon.ApiRequestDataSearch)
-	if request.Type != daemon.ApiRequestTypeSearch || !ok {
+	data, ok := request.Data.(daemon.ApiRequestDataNativeCatalog)
+	if request.Type != daemon.ApiRequestTypeNativeCatalog || !ok {
 		t.Fatalf("request: type %q, data %T", request.Type, request.Data)
 	}
-	if data.Query != "hello" || data.Offset != 1 || data.Limit != 1 {
+	if data.Kind != "search" || data.Query != "hello" || data.Offset != 1 || data.Limit != 1 {
 		t.Fatalf("request data: %#v", data)
 	}
 }

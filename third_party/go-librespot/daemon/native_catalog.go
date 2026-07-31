@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"time"
 
 	librespot "github.com/devgianlu/go-librespot"
 	connectpb "github.com/devgianlu/go-librespot/proto/spotify/connectstate"
@@ -54,6 +55,8 @@ func requestNativeCatalog(ctx context.Context, log librespot.Logger, sess *sessi
 		payload, err = nativeTopArtists(ctx, log, client, sess.Username(), request)
 	case "search":
 		payload, err = nativeSearch(ctx, log, client, request)
+	case "recommended_playlists":
+		payload, err = nativeRecommendedPlaylists(ctx, client, request)
 	default:
 		return nil, fmt.Errorf("unknown native catalog kind %q", request.Kind)
 	}
@@ -398,11 +401,17 @@ func nativeArtist(ctx context.Context, client *spclient.Spclient, request ApiReq
 			albums = append(albums, value)
 		}
 	}
+	playlists, playlistErr := nativeArtistPlaylists(ctx, client, request)
+	if playlistErr != nil {
+		playlists = nativePage{Items: []any{}, Total: 0, Offset: request.Offset, Limit: request.Limit}.value()
+	}
 	return map[string]any{
-		"artist":  artistValue(&artist),
-		"genres":  []string{},
-		"popular": nativePage{Items: popular, Total: len(popular), Offset: 0, Limit: len(popular)}.value(),
-		"albums":  nativePage{Items: albums, Total: len(albumURIs), Offset: request.Offset, Limit: request.Limit}.value(),
+		"artist":                artistValue(&artist),
+		"genres":                []string{},
+		"popular":               nativePage{Items: popular, Total: len(popular), Offset: 0, Limit: len(popular)}.value(),
+		"albums":                nativePage{Items: albums, Total: len(albumURIs), Offset: request.Offset, Limit: request.Limit}.value(),
+		"playlists":             playlists,
+		"playlists_unavailable": playlistErr != nil,
 	}, nil
 }
 
@@ -477,7 +486,119 @@ func nativeSearch(ctx context.Context, log librespot.Logger, client *spclient.Sp
 		})
 	}
 	search := response.(ApiResponseSearch)
-	return map[string]any{"tracks": nativePage{Items: items, Total: search.Total, Offset: search.Offset, Limit: request.Limit}.value()}, nil
+	playlists, playlistErr := nativeSearchPlaylists(ctx, client, request)
+	if playlistErr != nil {
+		playlists = nativePage{Items: []any{}, Total: 0, Offset: request.Offset, Limit: request.Limit}.value()
+	}
+	return map[string]any{
+		"tracks":                nativePage{Items: items, Total: search.Total, Offset: search.Offset, Limit: request.Limit}.value(),
+		"playlists":             playlists,
+		"playlists_unavailable": playlistErr != nil,
+	}, nil
+}
+
+const (
+	playlistDiscoveryTimeout = 2 * time.Second
+)
+
+type pathfinderQuerySpec struct {
+	operation string
+	hash      string
+}
+
+var (
+	pathfinderSearchSuggestions = pathfinderQuerySpec{operation: "searchSuggestions", hash: "23f33ca50a0f4153dafc5cd1b4d1370db01b72130c2994bd0ffd07d5a7fee8f0"}
+	pathfinderHome              = pathfinderQuerySpec{operation: "home", hash: "76243c78b0e20ecdbe41b794dec8cbe73f75e585b0a7201b8d2e84578412847a"}
+	pathfinderArtistPlaylists   = pathfinderQuerySpec{operation: "queryArtistPlaylists", hash: "54f7e5a5a2af05b7dc98526df376a46c6b15c05440c8dfdc8f6cecb1a807eca7"}
+)
+
+func nativeSearchPlaylists(ctx context.Context, client *spclient.Spclient, request ApiRequestDataNativeCatalog) (any, error) {
+	result, err := nativePathfinderQuery(ctx, client, pathfinderSearchSuggestions, map[string]any{
+		"query": request.Query, "limit": request.Limit, "numberOfTopResults": request.Limit,
+		"offset": request.Offset, "includeAuthors": true, "includeAlbumPreReleases": false, "includeEpisodeContentRatingsV2": false,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("search public playlists: %w", err)
+	}
+	return pathfinderPlaylistPage(pathfinderValue(result, "searchV2", "topResultsV2", "itemsV2"), request), nil
+}
+
+func nativeRecommendedPlaylists(ctx context.Context, client *spclient.Spclient, request ApiRequestDataNativeCatalog) (any, error) {
+	result, err := nativePathfinderQuery(ctx, client, pathfinderHome, map[string]any{
+		"homeEndUserIntegration": "", "timeZone": "", "sp_t": "", "facet": "",
+		"sectionItemsLimit": request.Limit, "includeEpisodeContentRatingsV2": false,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("load recommended playlists: %w", err)
+	}
+	return homePlaylistPage(result, request), nil
+}
+
+func nativeArtistPlaylists(ctx context.Context, client *spclient.Spclient, request ApiRequestDataNativeCatalog) (any, error) {
+	result, err := nativePathfinderQuery(ctx, client, pathfinderArtistPlaylists, map[string]string{"uri": request.URI})
+	if err != nil {
+		return nil, fmt.Errorf("load artist playlists: %w", err)
+	}
+	return pathfinderPlaylistPage(pathfinderValue(result, "artistUnion", "profile", "playlistsV2", "items"), request), nil
+}
+
+func nativePathfinderQuery(ctx context.Context, client *spclient.Spclient, spec pathfinderQuerySpec, variables any) (map[string]any, error) {
+	queryContext, cancel := context.WithTimeout(ctx, playlistDiscoveryTimeout)
+	defer cancel()
+	var result map[string]any
+	if err := client.PathfinderQuery(queryContext, spec.operation, spec.hash, variables, &result); err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+func pathfinderValue(value map[string]any, keys ...string) any {
+	var current any = value
+	for _, key := range keys {
+		object, ok := current.(map[string]any)
+		if !ok {
+			return nil
+		}
+		current = object[key]
+	}
+	return current
+}
+
+func pathfinderPlaylistPage(value any, request ApiRequestDataNativeCatalog) any {
+	values := make([]any, 0)
+	collectPlaylists(value, &values)
+	values = uniqueEntityValues(values, "uri")
+	start := minInt(request.Offset, len(values))
+	end := minInt(start+request.Limit, len(values))
+	return nativePage{Items: values[start:end], Total: len(values), Offset: request.Offset, Limit: request.Limit}.value()
+}
+
+func homePlaylistPage(value map[string]any, request ApiRequestDataNativeCatalog) any {
+	values := make([]any, 0)
+	collectHomePlaylists(pathfinderValue(value, "home"), &values)
+	values = uniqueEntityValues(values, "uri")
+	start := minInt(request.Offset, len(values))
+	end := minInt(start+request.Limit, len(values))
+	return nativePage{Items: values[start:end], Total: len(values), Offset: request.Offset, Limit: request.Limit}.value()
+}
+
+func collectHomePlaylists(value any, result *[]any) {
+	switch typed := value.(type) {
+	case []any:
+		for _, child := range typed {
+			collectHomePlaylists(child, result)
+		}
+	case map[string]any:
+		if candidate := playlistValue(typed); candidate != nil {
+			*result = append(*result, candidate)
+			return
+		}
+		for _, key := range []string{"sectionContainer", "sections", "items", "data"} {
+			if child, ok := typed[key]; ok {
+				collectHomePlaylists(child, result)
+			}
+		}
+	}
 }
 
 func nativeTopArtists(ctx context.Context, log librespot.Logger, client *spclient.Spclient, username string, request ApiRequestDataNativeCatalog) (any, error) {
@@ -579,6 +700,11 @@ func playlistValue(value map[string]any) map[string]any {
 		trackCount = intValue(tracks, "total")
 	}
 	owner := value["owner"]
+	if owner == nil {
+		if ownerV2, ok := value["ownerV2"].(map[string]any); ok {
+			owner = ownerV2["data"]
+		}
+	}
 	switch typed := owner.(type) {
 	case string:
 		owner = map[string]any{"name": typed}
@@ -592,6 +718,19 @@ func playlistValue(value map[string]any) map[string]any {
 		owner = map[string]any{"name": ""}
 	}
 	images := value["images"]
+	if imageData, ok := images.(map[string]any); ok {
+		if items, ok := imageData["items"].([]any); ok {
+			sources := make([]any, 0)
+			for _, item := range items {
+				if item, ok := item.(map[string]any); ok {
+					if sourceValues, ok := item["sources"].([]any); ok {
+						sources = append(sources, sourceValues...)
+					}
+				}
+			}
+			images = sources
+		}
+	}
 	if images == nil && value["image_url"] != nil {
 		images = []any{map[string]any{"url": value["image_url"]}}
 	} else {

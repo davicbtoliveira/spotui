@@ -159,6 +159,54 @@ func (c *Spclient) WebApiRequest(ctx context.Context, method string, path string
 	return c.innerRequest(ctx, method, reqURL, query, header, body)
 }
 
+// PathfinderQuery executes a persisted query through Spotify's authenticated
+// client catalog service. It reuses the Spclient token flow instead of the
+// quota-bound public Web API.
+func (c *Spclient) PathfinderQuery(ctx context.Context, operation, hash string, variables any, output any) error {
+	encodedVariables, err := json.Marshal(variables)
+	if err != nil {
+		return fmt.Errorf("encode pathfinder variables: %w", err)
+	}
+	encodedExtensions, err := json.Marshal(map[string]any{
+		"persistedQuery": map[string]any{"version": 1, "sha256Hash": hash},
+	})
+	if err != nil {
+		return fmt.Errorf("encode pathfinder extensions: %w", err)
+	}
+	requestURL, err := url.Parse("https://api-partner.spotify.com/pathfinder/v1/query")
+	if err != nil {
+		return fmt.Errorf("parse pathfinder URL: %w", err)
+	}
+	response, err := c.innerRequest(ctx, http.MethodGet, requestURL, url.Values{
+		"operationName": {operation},
+		"variables":     {string(encodedVariables)},
+		"extensions":    {string(encodedExtensions)},
+	}, http.Header{"Accept": {"application/json"}, "App-Platform": {"WebPlayer"}}, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = response.Body.Close() }()
+	if response.StatusCode != http.StatusOK {
+		return fmt.Errorf("pathfinder query returned status %d", response.StatusCode)
+	}
+	var payload struct {
+		Data   json.RawMessage `json:"data"`
+		Errors []struct {
+			Message string `json:"message"`
+		} `json:"errors"`
+	}
+	if err := json.NewDecoder(response.Body).Decode(&payload); err != nil {
+		return fmt.Errorf("decode pathfinder response: %w", err)
+	}
+	if len(payload.Errors) > 0 {
+		return fmt.Errorf("pathfinder query failed: %s", payload.Errors[0].Message)
+	}
+	if err := json.Unmarshal(payload.Data, output); err != nil {
+		return fmt.Errorf("decode pathfinder data: %w", err)
+	}
+	return nil
+}
+
 func (c *Spclient) Request(ctx context.Context, method string, path string, query url.Values, header http.Header, body []byte) (*http.Response, error) {
 	reqUrl := c.baseUrl.JoinPath(path)
 	return c.innerRequest(ctx, method, reqUrl, query, header, body)

@@ -64,8 +64,10 @@ daemon requests and translates engine events back into a small SpotUI event
 model. It also owns reconnect and logout lifecycle operations.
 
 Catalog reads use the native catalog capabilities exposed by the pinned fork.
-This keeps browsing and grouped search inside the same authenticated runtime
-as playback and avoids requiring a separate official Web API client.
+Public Playlist discovery uses authenticated Pathfinder persisted queries from
+that same runtime; a failed discovery query leaves the rest of its browse page
+usable. This keeps browsing and grouped search inside the same authenticated
+runtime as playback and avoids requiring a separate official Web API client.
 
 ### `third_party/go-librespot`
 
