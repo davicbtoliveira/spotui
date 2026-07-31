@@ -508,6 +508,9 @@ func (m RootModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if msg.String() == KeyQuit {
 		return m, tea.Quit
 	}
+	if m.state == stateReady && m.browseInitialized && m.searchInputActive {
+		return m.handleBrowseKey(msg)
+	}
 
 	if m.confirmingLogout {
 		switch {

@@ -135,6 +135,18 @@ func TestPlaybackProgressStopsAtTrackDuration(t *testing.T) {
 	}
 }
 
+func TestSearchInputAcceptsQWithoutQuitting(t *testing.T) {
+	engine := spotengine.NewFake()
+	m := browseReadyModel(engine)
+	m.searchInputActive = true
+
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(KeyQuitAlt)})
+	m = updated.(RootModel)
+	if cmd != nil || m.searchQuery != KeyQuitAlt {
+		t.Fatalf("search input: query=%q cmd=%v, want query %q and no command", m.searchQuery, cmd != nil, KeyQuitAlt)
+	}
+}
+
 func TestPendingLoginShowsURLRetriesAndCancels(t *testing.T) {
 	engine := spotengine.NewFake()
 	browser := &modelBrowser{}
